@@ -1,0 +1,6 @@
+{
+    "name": "NoBlocked",
+    "description": "Hides blocked and ignored users everywhere: messages, replies to them, unread badges, reactions and the flash on chat open. Bars can be openable, locked or removed; back-and-forth runs merge into one bar.",
+    "authors": [{ "name": "Imperator" }, { "name": "Claude" }],
+    "vendetta": { "icon": "ic_block" }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "noblocked",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev": "node tools/dev-server.mjs",
+    "eval": "node tools/eval.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node tests/i18n.test.mjs"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.13.1",
+    "@swc/helpers": "^0.5.17",
+    "@types/react": "^19.1.8",
+    "esbuild": "^0.20.2",
+    "typescript": "^5.8.3",
+    "ws": "^8.18.0"
+  }
+}
