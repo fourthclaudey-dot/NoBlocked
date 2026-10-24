@@ -9,7 +9,7 @@ import { log } from "./log";
 import { ChannelStore, FluxDispatcher, HTTP, MessageReactionsStore } from "./discord";
 import { hiddenIds, kindOf, onHiddenChange } from "./hidden";
 import { onVisibleMessages } from "./rows";
-import { storage } from "./settings";
+import { hidesReactions } from "./settings";
 
 type ReactionType = 0 | 1; // normal, burst ("super")
 
@@ -26,13 +26,19 @@ let running = false;
 const emojiKey = (e: any) => (e.id ? `${e.name}:${e.id}` : e.name);
 const keyOf = (messageId: string, e: any, t: ReactionType) => `${messageId}|${emojiKey(e)}|${t}`;
 
+/** Hidden user whose reactions the settings say to drop. */
+function reactionHidden(userId: string): boolean {
+    const kind = kindOf(userId);
+    return !!kind && hidesReactions(kind);
+}
+
 function decSnowflake(id: string) {
     return (BigInt(id) - BigInt(1)).toString();
 }
 
 /** Hidden users that could have reacted in this channel (DMs: only participants). */
 function candidates(channelId: string): string[] {
-    const ids = hiddenIds();
+    const ids = hiddenIds().filter(reactionHidden);
     const ch = ChannelStore().getChannel(channelId);
     if (ch && !ch.guild_id && Array.isArray(ch.recipients)) return ids.filter(id => ch.recipients.includes(id));
     return ids;
@@ -41,7 +47,7 @@ function candidates(channelId: string): string[] {
 function hiddenReactors(key: string): string[] {
     const m = known.get(key);
     if (!m) return [];
-    return [...m].filter(([id, reacted]) => reacted && kindOf(id)).map(([id]) => id);
+    return [...m].filter(([id, reacted]) => reacted && reactionHidden(id)).map(([id]) => id);
 }
 
 async function request(url: string, query: Record<string, any>): Promise<any[]> {
@@ -104,7 +110,6 @@ function pump() {
 }
 
 function schedule(channelId: string, messages: any[]) {
-    if (!storage.reactions) return;
     // Only the open chat matters: drop work queued for chats that are no longer on screen.
     for (let i = queue.length - 1; i >= 0; i--) {
         if (queue[i].channelId === channelId) continue;
@@ -157,11 +162,11 @@ function adjustPayload(message: any) {
 
 /** Interceptor: live reaction events and payload rewriting. Returns true to swallow. */
 export function interceptReactions(action: any): boolean {
-    if (!storage.reactions || action.__kb) return false;
+    if (action.__kb) return false;
     switch (action.type) {
         case "MESSAGE_REACTION_ADD":
         case "MESSAGE_REACTION_REMOVE": {
-            if (!kindOf(action.userId)) return false;
+            if (!reactionHidden(action.userId)) return false;
             const t: ReactionType = action.reactionType === 1 || action.burst ? 1 : 0;
             const key = keyOf(action.messageId, action.emoji, t);
             const m = known.get(key) ?? new Map<string, boolean>();
@@ -187,19 +192,23 @@ export function interceptReactions(action: any): boolean {
 // MessageReactionsStore.getReactions returns Map<userId, User>. The filtered copy is cached per
 // source Map so components see a stable object until the store or the hidden list changes.
 
-let filteredCache = new WeakMap<Map<string, any>, { size: number; out: Map<string, any> }>();
+let filteredCache = new WeakMap<Map<string, any>, { size: number; sig: string; out: Map<string, any> }>();
+
+/** Changes whenever the settings that decide whose reactions are hidden change. */
+const settingsSig = () => `${hidesReactions("blocked")}${hidesReactions("ignored")}`;
 
 function filterReactors(users: unknown) {
-    if (!storage.reactions || !(users instanceof Map)) return users;
+    if (!(users instanceof Map)) return users;
+    const sig = settingsSig();
     const hit = filteredCache.get(users);
-    if (hit && hit.size === users.size) return hit.out; // the store may also grow the Map in place
+    if (hit && hit.size === users.size && hit.sig === sig) return hit.out; // the store may also grow the Map in place
     let out = users as Map<string, any>;
     for (const id of users.keys()) {
-        if (!kindOf(id)) continue;
+        if (!reactionHidden(id)) continue;
         if (out === users) out = new Map(users);
         out.delete(id);
     }
-    filteredCache.set(users, { size: users.size, out });
+    filteredCache.set(users, { size: users.size, sig, out });
     return out;
 }
 

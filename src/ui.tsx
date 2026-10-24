@@ -32,7 +32,7 @@ function ModePicker({ value, options, onChange, disabled }: { value: string; opt
 }
 
 function CategorySection({ cat, title, options }: { cat: Category; title: string; options: ModeKey[] }) {
-    const s = storage[cat] as { mode: string; unread: boolean };
+    const s = storage[cat] as { mode: string; unread: boolean; reactions?: boolean };
     const str = t();
     return (
         <FormSection title={title}>
@@ -45,6 +45,15 @@ function CategorySection({ cat, title, options }: { cat: Category; title: string
                 disabled={storage.total}
                 onValueChange={(v: boolean) => { s.unread = v; changed(); }}
             />
+            {cat !== "replies" && (
+                <FormSwitchRow
+                    label={str.reactions}
+                    subLabel={str.reactionsNote}
+                    value={storage.total || !!s.reactions}
+                    disabled={storage.total}
+                    onValueChange={(v: boolean) => { s.reactions = v; changed(); }}
+                />
+            )}
         </FormSection>
     );
 }
@@ -52,7 +61,7 @@ function CategorySection({ cat, title, options }: { cat: Category; title: string
 export function SettingsPage() {
     useProxy(storage);
     const str = t();
-    const toggle = (key: "total" | "merge" | "reactions" | "serverAck") => (v: boolean) => {
+    const toggle = (key: "total" | "merge" | "serverAck") => (v: boolean) => {
         storage[key] = v;
         changed();
     };
@@ -73,7 +82,6 @@ export function SettingsPage() {
 
             <FormSection title={str.display}>
                 <FormSwitchRow label={str.merge} subLabel={str.mergeNote} value={storage.merge} onValueChange={toggle("merge")} />
-                <FormSwitchRow label={str.reactions} subLabel={str.reactionsNote} value={storage.reactions} onValueChange={toggle("reactions")} />
                 <FormSwitchRow label={str.serverAck} subLabel={str.serverAckNote} value={storage.serverAck} onValueChange={toggle("serverAck")} />
             </FormSection>
 

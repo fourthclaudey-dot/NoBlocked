@@ -21,14 +21,14 @@ Discord mobile mods) that takes blocked and ignored users out of your Discord.
   same way (off by default).
 - **Merged bars** — a back-and-forth between hidden users (blocked, ignored, replies
   alternating) becomes one bar; opening it shows the original bars as Discord would.
-- **No "new message" noise** — their messages don't mark chats unread, don't ping, don't move
+- **No "new message" noise** — their messages don't mark chats unread, don't move
   DMs up and don't show in-app notifications. Chats that only got hidden messages are also
   marked read on the server, so other devices and the next app start agree. "Passive" guild
   updates (a new last message id with no author) are checked before they can light a channel
   up. Configurable per category.
 - **Reactions** — their reactions are subtracted from reaction counters and they are removed
-  from the "who reacted" list (the plugin asks the API who reacted; costs extra requests, can
-  be turned off).
+  from the "who reacted" list (the plugin asks the API who reacted; costs extra requests).
+  Separate switch for blocked and for ignored users.
 - **No flash on start** — Discord learns who is blocked ~1.5 s after launch, but shows cached
   messages earlier; the plugin keeps its own copy of the list so nothing flickers.
 - **History never gets stuck** — when a whole page of older messages is hidden, the plugin
