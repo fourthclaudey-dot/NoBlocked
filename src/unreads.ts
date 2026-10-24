@@ -6,9 +6,10 @@
 //    next app start agree.
 // 3. Startup: Discord's own unread state comes from the server; channels that only got hidden
 //    messages while we were away are checked (one request each) and acked.
+// 4. Passive guild updates carry no author: held back until one request shows who wrote.
 import { log } from "./log";
 import { silentForUnread } from "./classify";
-import { AckActions, ChannelStore, FluxDispatcher, HTTP, ReadStateStore, UserGuildSettingsStore } from "./discord";
+import { AckActions, ChannelStore, FluxDispatcher, HTTP, ReadStateStore, SelectedChannelStore, UserGuildSettingsStore } from "./discord";
 import { onHiddenChange } from "./hidden";
 import { storage } from "./settings";
 
@@ -149,6 +150,68 @@ function scheduleReconcile(delay = 4000) {
 }
 
 const onConnectionOpen = () => scheduleReconcile();
+
+// ---- passive updates ------------------------------------------------------------------------
+// For "passive" guilds Discord sends PASSIVE_UPDATE_V2 with only a channel's new last message id,
+// no author. ReadStateStore would light the channel up at once. Entries that would turn a read
+// channel unread are held back, checked with one request, and released only if something visible
+// arrived; hidden-only activity is acked instead.
+
+function snowflakeGreater(a: string, b: string) {
+    return a.length !== b.length ? a.length > b.length : a > b;
+}
+
+/** Same action with only these channels and every other list emptied, so no other update repeats. */
+function passiveWith(action: any, key: string, channels: any[]) {
+    const out: any = { __kb: true };
+    for (const [k, v] of Object.entries(action)) out[k] = Array.isArray(v) ? [] : v;
+    out[key] = channels;
+    return out;
+}
+
+async function verifyPassive(action: any, key: string, held: any[]) {
+    const RS = ReadStateStore();
+    const release: any[] = [];
+    for (const entry of held) {
+        const channelId = entry.id;
+        const state = RS.getAllReadStates?.().find((s: any) => s.channelId === channelId);
+        const after = (state && ackAnchor(state)) ?? RS.lastMessageId(channelId);
+        try {
+            const msgs: any[] = after ? (await HTTP().get({ url: `/channels/${channelId}/messages`, query: { after, limit: 50 } })).body ?? [] : [];
+            if (!msgs.length) continue; // nothing there anymore (deleted): drop
+            if (msgs.every(m => silentForUnread(m))) {
+                queueAck(channelId, msgs.reduce((a: string | undefined, m: any) => snowflakeMax(a, m.id), undefined as any));
+                continue;
+            }
+            release.push(entry);
+        } catch (e) {
+            release.push(entry); // fail open: never lose a real unread
+        }
+        await new Promise(r => setTimeout(r, 250));
+    }
+    log.info(`passive update: ${held.length} held, ${release.length} released`);
+    if (release.length) FluxDispatcher.dispatch(passiveWith(action, key, release));
+}
+
+/** Interceptor: mutates PASSIVE_UPDATE_V2 in place; never swallows the whole action. */
+export function interceptPassive(action: any): boolean {
+    if (action.type !== "PASSIVE_UPDATE_V2" || action.__kb) return false;
+    const key = Array.isArray(action.channels) ? "channels" : Array.isArray(action.updatedChannels) ? "updatedChannels" : null;
+    if (!key) return false;
+    const RS = ReadStateStore();
+    const selected = SelectedChannelStore()?.getChannelId?.();
+    const held: any[] = [];
+    action[key] = action[key].filter((c: any) => {
+        const last: string | undefined = c?.lastMessageId ?? c?.last_message_id;
+        if (!c?.id || !last || c.id === selected || RS.hasUnread(c.id)) return true;
+        const local = RS.lastMessageId(c.id);
+        if (local && !snowflakeGreater(last, local)) return true;
+        held.push(c);
+        return false;
+    });
+    if (held.length) void verifyPassive(action, key, held).catch(e => log.error("passive verify", e));
+    return false;
+}
 
 export function startUnreads() {
     const unwrap = wrapStoreHandlers();

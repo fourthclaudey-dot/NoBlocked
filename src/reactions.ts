@@ -4,9 +4,9 @@
 // GET .../reactions/{emoji}?after=X-1&limit=1. Per emoji we pick the cheaper of that (one per
 // hidden user) or paging the full list (ceil(count/100)).
 // Found reactions are subtracted locally with a synthetic MESSAGE_REACTION_REMOVE, and re-applied
-// to payloads whenever Discord reloads the message.
+// to payloads whenever Discord reloads the message. The "who reacted" list is filtered too.
 import { log } from "./log";
-import { ChannelStore, FluxDispatcher, HTTP } from "./discord";
+import { ChannelStore, FluxDispatcher, HTTP, MessageReactionsStore } from "./discord";
 import { hiddenIds, kindOf, onHiddenChange } from "./hidden";
 import { onVisibleMessages } from "./rows";
 import { storage } from "./settings";
@@ -19,7 +19,7 @@ const checkedAt = new Map<string, number>();
 /** Hidden reactions already subtracted from the message record currently in the store. */
 const applied = new Map<string, Set<string>>();
 const RECHECK_MS = 10 * 60 * 1000;
-const queue: (() => Promise<void>)[] = [];
+const queue: { channelId: string; key: string; run: () => Promise<void> }[] = [];
 const queued = new Set<string>();
 let running = false;
 
@@ -99,12 +99,18 @@ function pump() {
     const job = queue.shift();
     if (!job) return;
     running = true;
-    job().catch(e => log.warn("reaction probe failed", e?.status ?? e))
+    job.run().catch(e => log.warn("reaction probe failed", e?.status ?? e))
         .finally(() => setTimeout(() => { running = false; pump(); }, 250));
 }
 
 function schedule(channelId: string, messages: any[]) {
     if (!storage.reactions) return;
+    // Only the open chat matters: drop work queued for chats that are no longer on screen.
+    for (let i = queue.length - 1; i >= 0; i--) {
+        if (queue[i].channelId === channelId) continue;
+        queued.delete(queue[i].key);
+        queue.splice(i, 1);
+    }
     const users = candidates(channelId);
     if (!users.length) return;
     // newest messages first: they are the ones on screen when a chat opens
@@ -119,7 +125,7 @@ function schedule(channelId: string, messages: any[]) {
                 const missing = users.filter(id => !done?.has(id));
                 if ((fresh && !missing.length) || queued.has(key)) continue;
                 queued.add(key);
-                queue.push(() => probe(channelId, msg.id, r, t, fresh ? missing : users).finally(() => queued.delete(key)));
+                queue.push({ channelId, key, run: () => probe(channelId, msg.id, r, t, fresh ? missing : users).finally(() => queued.delete(key)) });
             }
         }
     }
@@ -177,11 +183,42 @@ export function interceptReactions(action: any): boolean {
     return false;
 }
 
+// ---- "who reacted" sheet ---------------------------------------------------------------------
+// MessageReactionsStore.getReactions returns Map<userId, User>. The filtered copy is cached per
+// source Map so components see a stable object until the store or the hidden list changes.
+
+let filteredCache = new WeakMap<Map<string, any>, { size: number; out: Map<string, any> }>();
+
+function filterReactors(users: unknown) {
+    if (!storage.reactions || !(users instanceof Map)) return users;
+    const hit = filteredCache.get(users);
+    if (hit && hit.size === users.size) return hit.out; // the store may also grow the Map in place
+    let out = users as Map<string, any>;
+    for (const id of users.keys()) {
+        if (!kindOf(id)) continue;
+        if (out === users) out = new Map(users);
+        out.delete(id);
+    }
+    filteredCache.set(users, { size: users.size, out });
+    return out;
+}
+
+function patchReactorList() {
+    const store = MessageReactionsStore();
+    if (!store?.getReactions) {
+        log.warn("MessageReactionsStore.getReactions not found, reactor list unfiltered");
+        return () => {};
+    }
+    return vendetta.patcher.after("getReactions", store, (_args: any[], users: unknown) => filterReactors(users));
+}
+
 export function startReactions() {
     onVisibleMessages(schedule);
-    const off = onHiddenChange(() => { known.clear(); checkedAt.clear(); applied.clear(); });
+    const unpatchList = patchReactorList();
+    const off = onHiddenChange(() => { known.clear(); checkedAt.clear(); applied.clear(); filteredCache = new WeakMap(); });
     return () => {
         onVisibleMessages(null);
+        unpatchList();
         off();
         queue.length = 0;
         queued.clear();

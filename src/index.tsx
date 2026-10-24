@@ -6,12 +6,12 @@ import { interceptReactions, startReactions } from "./reactions";
 import { interceptReveal, patchRows, rerender } from "./rows";
 import { applyDefaults, storage } from "./settings";
 import { SettingsPage } from "./ui";
-import { startUnreads } from "./unreads";
+import { interceptPassive, startUnreads } from "./unreads";
 
 function interceptor(action: any): boolean {
     try {
         if (action.type === "TYPING_START") return storage.typing && !!kindOf(action.userId);
-        return interceptReveal(action) || interceptReactions(action);
+        return interceptReveal(action) || interceptReactions(action) || interceptPassive(action);
     } catch (e) {
         log.error("interceptor", e);
         return false;

@@ -17,6 +17,7 @@ export const SelectedChannelStore = lazy(() => metro.findByStoreName("SelectedCh
 export const UserGuildSettingsStore = lazy(() => metro.findByStoreName("UserGuildSettingsStore"));
 export const ReferencedMessageStore = lazy(() => metro.findByStoreName("ReferencedMessageStore"));
 export const UserStore = lazy(() => metro.findByStoreName("UserStore"));
+export const MessageReactionsStore = lazy(() => metro.findByStoreName("MessageReactionsStore"));
 export const LocaleStore = lazy(() => metro.findByStoreName("LocaleStore"));
 export const GatewayConnectionStore = lazy(() => metro.findByStoreName("GatewayConnectionStore"));
 

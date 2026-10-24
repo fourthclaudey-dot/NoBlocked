@@ -1,6 +1,7 @@
 // Small adb wrapper for the dev loop.
 //   node tools/adb.mjs reverse          forward phone localhost:4041 -> PC dev server
 //   node tools/adb.mjs restart          force-stop + launch Discord (re-applies reverse)
+//   node tools/adb.mjs open             bring Discord to the front without restarting
 //   node tools/adb.mjs shot [out.png]   screenshot (default logs/shot.png)
 //   node tools/adb.mjs tap X Y | swipe X1 Y1 X2 Y2 [ms] | text "..." | key KEYCODE
 //   node tools/adb.mjs ui [filter]      dump visible UI nodes (text/desc/bounds)
@@ -51,6 +52,12 @@ switch (cmd) {
         sh(`am start --user ${USER} -n ${PKG}/com.discord.main.MainDefault`);
         pickOriginalIfAsked();
         console.log("restarted");
+        break;
+    case "open": // bring Kettu to the front without restarting it
+        adb("reverse", `tcp:${PORT}`, `tcp:${PORT}`);
+        sh(`am start --user ${USER} -n ${PKG}/com.discord.main.MainDefault`);
+        pickOriginalIfAsked();
+        console.log("opened");
         break;
     case "shot": {
         const out = path.resolve(rest[0] ?? path.join(root, "logs", "shot.png"));
