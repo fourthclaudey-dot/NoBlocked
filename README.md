@@ -8,6 +8,10 @@ Discord mobile mods) that takes blocked and ignored users out of your Discord.
 - **Idea:** Imperator
 - **Code:** Claude (Anthropic)
 
+> 💡 **Have an idea or missing something?** Don't hesitate to
+> [open an issue](https://github.com/fourthclaudey-dot/NoBlocked/issues/new) — feature
+> suggestions are very welcome, big or small, in any language.
+
 ## What it does
 
 - **Chat** — messages from blocked/ignored users become a bar you can open, a bar that
