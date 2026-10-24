@@ -4,6 +4,8 @@ import { startHidden } from "./hidden";
 import { startLoadMore } from "./loadmore";
 import { interceptReactions, startReactions } from "./reactions";
 import { dropEmptyDays, interceptReveal, patchRows, rerender } from "./rows";
+import { startCacheGuard } from "./cache";
+import { startSelfUpdate } from "./selfupdate";
 import { applyDefaults, storage } from "./settings";
 import { SettingsPage } from "./ui";
 import { interceptPassive, startUnreads } from "./unreads";
@@ -48,10 +50,24 @@ let cleanups: (() => void)[] = [];
 
 export default {
     onLoad() {
-        if (__DEV__) devBootstrap();
+        if (__DEV__) {
+            // Boot probe: had Discord already loaded the open chat when the plugin started?
+            const ch = vendetta.metro.findByStoreName("SelectedChannelStore")?.getChannelId?.();
+            const cm = ch && vendetta.metro.findByStoreName("MessageStore")?.getMessages?.(ch);
+            const hidden = new Set([...(storage.cache?.blocked ?? []), ...(storage.cache?.ignored ?? [])]);
+            const msgs: any[] = cm?.toArray?.() ?? [];
+            (globalThis as any).__nbBoot = {
+                channel: ch,
+                cachedMessages: msgs.length,
+                ready: !!cm?.ready,
+                hiddenAuthored: msgs.filter(m => hidden.has(m.author?.id)).length,
+                repliesWithHiddenPreview: msgs.filter(m => hidden.has(m.referenced_message?.author?.id ?? m.referencedMessage?.author?.id)).length,
+            };
+            devBootstrap();
+        }
         applyDefaults();
         // Order matters: hidden IDs first, the rest reads them.
-        for (const start of [startHidden, addInterceptor, patchRows, startLoadMore, startUnreads, startReactions]) {
+        for (const start of [startHidden, addInterceptor, patchRows, startLoadMore, startUnreads, startReactions, startCacheGuard, startSelfUpdate]) {
             try {
                 cleanups.push(start());
             } catch (e) {

@@ -139,7 +139,9 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
     try {
         if (req.method === "GET" && (url.pathname === "/manifest.json" || url.pathname === "/index.js")) {
-            const { js, manifest, hash, ms } = await buildPlugin({ dev: true, debuggerHost: `localhost:${PORT}` });
+            // PLUGIN_DELAY_MS simulates a slow network; PLUGIN_RELEASE=1 serves the release build.
+            if (process.env.PLUGIN_DELAY_MS) await new Promise(r => setTimeout(r, Number(process.env.PLUGIN_DELAY_MS)));
+            const { js, manifest, hash, ms } = await buildPlugin(process.env.PLUGIN_RELEASE ? {} : { dev: true, debuggerHost: `localhost:${PORT}` });
             if (url.pathname === "/manifest.json") pushLog("server", `served manifest ${hash} (build ${ms}ms)`);
             return url.pathname === "/index.js" ? send(res, 200, js, "application/javascript") : send(res, 200, manifest);
         }
