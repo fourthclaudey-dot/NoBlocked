@@ -20,7 +20,6 @@ interface Strings {
     mergeNote: string;
     reactions: string;
     reactionsNote: string;
-    typing: string;
     serverAck: string;
     serverAckNote: string;
     cached: (blocked: number, ignored: number) => string;
@@ -69,7 +68,6 @@ const en: Strings = {
     mergeNote: "Several bars in a row (a back-and-forth) collapse into one; opening it shows them as usual",
     reactions: "Don't count their reactions",
     reactionsNote: "Removes hidden users from reaction counters (extra API requests)",
-    typing: "Hide \"is typing…\"",
     serverAck: "Mark as read on the server",
     serverAckNote: "If a chat has nothing new except hidden messages, mark it read on other devices too",
     cached: (b, i) => `Cached: ${b} blocked, ${i} ignored`,
@@ -99,7 +97,6 @@ const de: Strings = {
     mergeNote: "Mehrere Hinweise hintereinander (ein Schlagabtausch) werden zu einem; beim Aufklappen erscheinen sie wie gewohnt",
     reactions: "Ihre Reaktionen nicht zählen",
     reactionsNote: "Entfernt ausgeblendete Nutzer aus Reaktionszählern (zusätzliche API-Anfragen)",
-    typing: "„schreibt …“ ausblenden",
     serverAck: "Auf dem Server als gelesen markieren",
     serverAckNote: "Wenn ein Chat außer Ausgeblendetem nichts Neues enthält, auch auf anderen Geräten als gelesen markieren",
     cached: (b, i) => `Im Cache: ${b} blockiert, ${i} ignoriert`,
@@ -129,7 +126,6 @@ const fr: Strings = {
     mergeNote: "Plusieurs bandeaux à la suite (un échange) n'en forment qu'un ; l'ouvrir les affiche comme d'habitude",
     reactions: "Ne pas compter leurs réactions",
     reactionsNote: "Retire les utilisateurs masqués des compteurs de réactions (requêtes API supplémentaires)",
-    typing: "Masquer « est en train d'écrire… »",
     serverAck: "Marquer comme lu sur le serveur",
     serverAckNote: "Si une discussion ne contient rien de nouveau à part des messages masqués, la marquer comme lue sur les autres appareils aussi",
     cached: (b, i) => `En cache : ${b} bloqués, ${i} ignorés`,
@@ -159,7 +155,6 @@ const es: Strings = {
     mergeNote: "Varios avisos seguidos (un intercambio) se agrupan en uno; al abrirlo se muestran como siempre",
     reactions: "No contar sus reacciones",
     reactionsNote: "Quita a los usuarios ocultos de los contadores de reacciones (solicitudes extra a la API)",
-    typing: "Ocultar «está escribiendo…»",
     serverAck: "Marcar como leído en el servidor",
     serverAckNote: "Si un chat no tiene nada nuevo salvo mensajes ocultos, marcarlo como leído también en otros dispositivos",
     cached: (b, i) => `En caché: ${b} bloqueados, ${i} ignorados`,
@@ -189,7 +184,6 @@ const it: Strings = {
     mergeNote: "Più avvisi di fila (uno scambio) diventano uno solo; aprendolo si vedono come al solito",
     reactions: "Non contare le loro reazioni",
     reactionsNote: "Rimuove gli utenti nascosti dai contatori delle reazioni (richieste API aggiuntive)",
-    typing: "Nascondi «sta scrivendo…»",
     serverAck: "Segna come letto sul server",
     serverAckNote: "Se una chat non ha nulla di nuovo oltre ai messaggi nascosti, segnala come letta anche sugli altri dispositivi",
     cached: (b, i) => `In cache: ${b} bloccati, ${i} ignorati`,
@@ -219,7 +213,6 @@ const pt: Strings = {
     mergeNote: "Vários avisos seguidos (uma troca de mensagens) juntam-se num só; ao abri-lo aparecem como de costume",
     reactions: "Não contar as reações deles",
     reactionsNote: "Retira os utilizadores ocultos dos contadores de reações (pedidos extra à API)",
-    typing: "Ocultar «está a escrever…»",
     serverAck: "Marcar como lido no servidor",
     serverAckNote: "Se um chat não tiver nada de novo além de mensagens ocultas, marcá-lo como lido também nos outros dispositivos",
     cached: (b, i) => `Em cache: ${b} bloqueados, ${i} ignorados`,
@@ -249,7 +242,6 @@ const pl: Strings = {
     mergeNote: "Kilka pasków z rzędu (wymiana zdań) łączy się w jeden; po rozwinięciu wyglądają jak zwykle",
     reactions: "Nie licz ich reakcji",
     reactionsNote: "Usuwa ukrytych użytkowników z liczników reakcji (dodatkowe zapytania do API)",
-    typing: "Ukryj „pisze…”",
     serverAck: "Oznaczaj jako przeczytane na serwerze",
     serverAckNote: "Jeśli w czacie nie ma nic nowego poza ukrytymi wiadomościami, oznacz go jako przeczytany także na innych urządzeniach",
     cached: (b, i) => `W pamięci: ${b} zablok., ${i} ignor.`,
@@ -279,7 +271,6 @@ const nl: Strings = {
     mergeNote: "Meerdere balken achter elkaar (een woordenwisseling) worden er één; openen toont ze zoals gewoonlijk",
     reactions: "Hun reacties niet meetellen",
     reactionsNote: "Haalt verborgen gebruikers uit reactietellers (extra API-verzoeken)",
-    typing: "„is aan het typen…” verbergen",
     serverAck: "Op de server als gelezen markeren",
     serverAckNote: "Als een chat niets nieuws heeft behalve verborgen berichten, ook op andere apparaten als gelezen markeren",
     cached: (b, i) => `In cache: ${b} geblokkeerd, ${i} genegeerd`,
@@ -309,7 +300,6 @@ const sv: Strings = {
     mergeNote: "Flera fält i rad (en ordväxling) blir ett; när det öppnas visas de som vanligt",
     reactions: "Räkna inte deras reaktioner",
     reactionsNote: "Tar bort dolda användare från reaktionsräknare (extra API-anrop)",
-    typing: "Dölj ”skriver…”",
     serverAck: "Markera som läst på servern",
     serverAckNote: "Om en chatt inte har något nytt utöver dolda meddelanden markeras den som läst även på andra enheter",
     cached: (b, i) => `I cache: ${b} blockerade, ${i} ignorerade`,
@@ -339,7 +329,6 @@ const ru: Strings = {
     mergeNote: "Несколько плашек подряд (перепалка) сворачиваются в одну; её раскрытие показывает их как обычно",
     reactions: "Не учитывать их реакции",
     reactionsNote: "Вычитает скрытых из счётчиков реакций (дополнительные запросы к API)",
-    typing: "Скрывать «печатает…»",
     serverAck: "Отмечать прочитанным на сервере",
     serverAckNote: "Если в чате нет ничего нового, кроме скрытого — помечать прочитанным и на других устройствах",
     cached: (b, i) => `В кэше: ${b} заблок., ${i} игнор.`,
@@ -369,7 +358,6 @@ const zh: Strings = {
     mergeNote: "连续的多个提示条（一段你来我往的对话）合并为一个；展开后按原样显示",
     reactions: "不计入他们的回应",
     reactionsNote: "从回应计数中去掉被隐藏的用户（会产生额外的 API 请求）",
-    typing: "隐藏“正在输入…”",
     serverAck: "在服务器上标记为已读",
     serverAckNote: "如果聊天中除了被隐藏的消息外没有新内容，在其他设备上也标记为已读",
     cached: (b, i) => `缓存：${b} 个已屏蔽，${i} 个已忽略`,

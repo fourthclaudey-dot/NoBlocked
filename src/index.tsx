@@ -1,6 +1,6 @@
 import { log } from "./log";
 import { FluxDispatcher } from "./discord";
-import { kindOf, startHidden } from "./hidden";
+import { startHidden } from "./hidden";
 import { startLoadMore } from "./loadmore";
 import { interceptReactions, startReactions } from "./reactions";
 import { interceptReveal, patchRows, rerender } from "./rows";
@@ -10,7 +10,6 @@ import { interceptPassive, startUnreads } from "./unreads";
 
 function interceptor(action: any): boolean {
     try {
-        if (action.type === "TYPING_START") return storage.typing && !!kindOf(action.userId);
         return interceptReveal(action) || interceptReactions(action) || interceptPassive(action);
     } catch (e) {
         log.error("interceptor", e);

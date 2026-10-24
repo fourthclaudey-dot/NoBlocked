@@ -29,7 +29,6 @@ Discord mobile mods) that takes blocked and ignored users out of your Discord.
   messages earlier; the plugin keeps its own copy of the list so nothing flickers.
 - **History never gets stuck** — when a whole page of older messages is hidden, the plugin
   keeps loading until something visible arrives.
-- **"Typing…"** from hidden users is hidden too.
 - **Total exclusion** — one switch that overrides everything above to "hide completely".
 
 Languages: English, Deutsch, Français, Español, Italiano, Português, Polski, Nederlands,

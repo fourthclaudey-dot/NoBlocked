@@ -52,7 +52,7 @@ function CategorySection({ cat, title, options }: { cat: Category; title: string
 export function SettingsPage() {
     useProxy(storage);
     const str = t();
-    const toggle = (key: "total" | "merge" | "reactions" | "serverAck" | "typing") => (v: boolean) => {
+    const toggle = (key: "total" | "merge" | "reactions" | "serverAck") => (v: boolean) => {
         storage[key] = v;
         changed();
     };
@@ -74,7 +74,6 @@ export function SettingsPage() {
             <FormSection title={str.display}>
                 <FormSwitchRow label={str.merge} subLabel={str.mergeNote} value={storage.merge} onValueChange={toggle("merge")} />
                 <FormSwitchRow label={str.reactions} subLabel={str.reactionsNote} value={storage.reactions} onValueChange={toggle("reactions")} />
-                <FormSwitchRow label={str.typing} value={storage.typing} onValueChange={toggle("typing")} />
                 <FormSwitchRow label={str.serverAck} subLabel={str.serverAckNote} value={storage.serverAck} onValueChange={toggle("serverAck")} />
             </FormSection>
 

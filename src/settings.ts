@@ -24,8 +24,6 @@ export interface Settings {
     reactions: boolean;
     /** Mark hidden-only activity as read on Discord's servers too (other devices, next start). */
     serverAck: boolean;
-    /** Hide "X is typing…" from hidden users. */
-    typing: boolean;
     /** Last known blocked/ignored IDs, used before Discord loads relationships at startup. */
     cache: { blocked: string[]; ignored: string[] };
 }
@@ -39,7 +37,6 @@ const defaults: Settings = {
     merge: true,
     reactions: true,
     serverAck: true,
-    typing: true,
     cache: { blocked: [], ignored: [] },
 };
 
