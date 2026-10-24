@@ -169,12 +169,35 @@ function dropDanglingUnread(rows: Row[]): Row[] {
     return rows.filter((_, j) => j !== i);
 }
 
+/** Rows that only decorate the list: they never count as a day having content. */
+const META_ROWS = new Set<unknown>(["day", "unread", "load_before"]);
+
+/**
+ * Date dividers ("day" rows) whose day lost all its rows: otherwise "1 Oct" would sit right above
+ * "2 Oct", or today's date above nothing, revealing that hidden users talked. Rows are newest-first,
+ * so a day's content is between its divider and the next divider at a lower index.
+ */
+export function dropEmptyDays(rows: Row[]): Row[] {
+    const drop = new Set<number>();
+    let hasContent = false;
+    for (let i = 0; i < rows.length; i++) {
+        const type = rows[i].rowType;
+        if (type === "day") {
+            if (!hasContent) drop.add(i);
+            hasContent = false;
+        } else if (!META_ROWS.has(type)) {
+            hasContent = true;
+        }
+    }
+    return drop.size ? rows.filter((_, i) => !drop.has(i)) : rows;
+}
+
 function processRows(args: any[], rows: Row[]): Row[] {
     const opts = args[0] ?? {};
     const channelId: string | undefined = opts.channel?.id;
     revealDenied.clear();
     mergedRuns.clear();
-    const out = dropDanglingUnread(finish(collect(rows, opts.messages?.revealedMessageId ?? null)));
+    const out = dropEmptyDays(dropDanglingUnread(finish(collect(rows, opts.messages?.revealedMessageId ?? null))));
 
     if (__DEV__) {
         const leaks = out.filter(r => r.rowType === RowType.MESSAGE && displayCategory(r.message));

@@ -3,7 +3,7 @@ import { FluxDispatcher } from "./discord";
 import { startHidden } from "./hidden";
 import { startLoadMore } from "./loadmore";
 import { interceptReactions, startReactions } from "./reactions";
-import { interceptReveal, patchRows, rerender } from "./rows";
+import { dropEmptyDays, interceptReveal, patchRows, rerender } from "./rows";
 import { applyDefaults, storage } from "./settings";
 import { SettingsPage } from "./ui";
 import { interceptPassive, startUnreads } from "./unreads";
@@ -31,6 +31,13 @@ function devBootstrap() {
     // when it answers: Kettu's own auto-connect would toast an error on every launch away from the PC.
     const s = vendetta.settings;
     if (s.autoDebugger) s.autoDebugger = false;
+    // Kettu 1.4.3 toasts don't fit Discord 350.x's toast store and crash the app chrome;
+    // the debugger connection toasts every time, so drop Kettu's own toasts in dev builds.
+    const toasts = vendetta.metro.common.toasts;
+    if (toasts?.open && !(globalThis as any).__nbToastPatch) {
+        (globalThis as any).__nbToastPatch = vendetta.patcher.instead("open", toasts, (args: any[], orig: Function) =>
+            String(args[0]?.key ?? "").startsWith("vd-toast-") ? undefined : orig(...args));
+    }
     if (Date.now() - ((globalThis as any).__kbDevPing ?? 0) < 5000) return; // already attached
     fetch(`http://${__DEBUGGER_HOST__}/status`)
         .then(r => r.ok && vendetta.debug.connectToDebugger(__DEBUGGER_HOST__))
@@ -51,7 +58,7 @@ export default {
                 log.error(`${start.name} failed`, e);
             }
         }
-        if (__DEV__) (globalThis as any).__nb = { storage, rerender };
+        if (__DEV__) (globalThis as any).__nb = { storage, rerender, dropEmptyDays };
         rerender();
         log.info("loaded");
     },

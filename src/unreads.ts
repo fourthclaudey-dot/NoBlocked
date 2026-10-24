@@ -35,15 +35,23 @@ function shouldSilence(action: any) {
     return !!action?.message && !action.optimistic && silentForUnread(action.message);
 }
 
+/** Store nodes of the dispatcher: a plain object in Discord 300.x, a Map since 350.x. */
+function storeNodes(AH: any): any[] | null {
+    const nodes = AH?._dependencyGraph?.nodes ?? AH?._nodes;
+    if (!nodes) return null;
+    return nodes instanceof Map ? [...nodes.values()] : Object.values(nodes);
+}
+
 function wrapStoreHandlers() {
     const AH = FluxDispatcher._actionHandlers;
-    const nodes = AH?._dependencyGraph?.nodes;
+    const nodes = storeNodes(AH);
     if (!nodes) {
-        log.error("flux dependency graph not found, unread silencing disabled");
+        log.error("flux store nodes not found, unread silencing disabled");
         return () => {};
     }
     const restore: (() => void)[] = [];
-    for (const node of Object.values<any>(nodes)) {
+    for (const node of nodes) {
+        if (!node) continue;
         if (!SILENCED_STORES.includes(node.name)) continue;
         const handlers = node.actionHandler;
         const orig = handlers?.MESSAGE_CREATE;
@@ -54,10 +62,11 @@ function wrapStoreHandlers() {
         };
         restore.push(() => void (handlers.MESSAGE_CREATE = orig));
     }
-    AH._invalidateCaches();
+    if (!restore.length) log.error("no unread-related stores found, unread silencing disabled");
+    AH._invalidateCaches?.();
     return () => {
         restore.forEach(f => f());
-        AH._invalidateCaches();
+        AH._invalidateCaches?.();
     };
 }
 

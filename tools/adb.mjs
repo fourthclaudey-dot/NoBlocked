@@ -26,7 +26,7 @@ const sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0,
  */
 function pickOriginalIfAsked() {
     for (let i = 0; i < 20; i++) {
-        const top = sh("dumpsys activity activities | grep topResumedActivity");
+        const top = sh("dumpsys activity activities | grep topResumedActivity || true");
         if (top.includes(`u${USER} ${PKG}/`)) return;
         if (top.includes("DoubleAppResolverActivity")) {
             sleep(700); // let the sheet finish sliding in, taps during the animation are lost
