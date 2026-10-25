@@ -27,11 +27,14 @@ export const MessageActions = lazy(() => metro.findByProps("fetchMessages", "sen
 export const AckActions = lazy(() => metro.findByProps("bulkAck", "localAck"));
 export const HTTP = lazy(() => metro.findByProps("getAPIBaseURL", "get"));
 
-/** rowType values produced by createChannelStream on Discord Android 300.x */
+/** rowType values produced by createChannelStream (Discord Android 300.x–350.x). */
 export const RowType = {
     MESSAGE: 1,
     BLOCKED_GROUP: 2,
     IGNORED_GROUP: 6,
+    DAY: "day",
+    UNREAD: "unread",
+    LOAD_BEFORE: "load_before",
 } as const;
 
 /** Raw relationship flux events that can change who is blocked/ignored. */

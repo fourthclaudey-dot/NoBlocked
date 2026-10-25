@@ -1,15 +1,15 @@
-import { log } from "./log";
 import { FluxDispatcher } from "./discord";
 import { startHidden } from "./hidden";
+import { log } from "./log";
 import { startLoadMore } from "./loadmore";
 import { interceptReactions, startReactions } from "./reactions";
-import { dropEmptyDays, interceptReveal, patchRows, rerender } from "./rows";
-import { startCacheGuard } from "./cache";
+import { interceptReveal, patchRows, rerender } from "./rows";
 import { startSelfUpdate } from "./selfupdate";
 import { applyDefaults, storage } from "./settings";
 import { SettingsPage } from "./ui";
 import { interceptPassive, startUnreads } from "./unreads";
 
+/** True swallows the action. */
 function interceptor(action: any): boolean {
     try {
         return interceptReveal(action) || interceptReactions(action) || interceptPassive(action);
@@ -20,11 +20,15 @@ function interceptor(action: any): boolean {
 }
 
 function addInterceptor() {
+    // Kettu's flux API: nullish keeps the action, false blocks it.
+    const intercept = (globalThis as any).bunny?.api?.flux?.intercept;
+    if (typeof intercept === "function") return intercept((action: any) => (interceptor(action) ? false : undefined));
+
+    // Other Vendetta-compatible mods: plain dispatcher interceptor.
     FluxDispatcher.addInterceptor(interceptor);
     return () => {
         const list: any[] = FluxDispatcher._interceptors ?? [];
-        const i = list.indexOf(interceptor);
-        if (i !== -1) list.splice(i, 1);
+        if (list.includes(interceptor)) list.splice(list.indexOf(interceptor), 1);
     };
 }
 
@@ -50,33 +54,18 @@ let cleanups: (() => void)[] = [];
 
 export default {
     onLoad() {
-        if (__DEV__) {
-            // Boot probe: had Discord already loaded the open chat when the plugin started?
-            const ch = vendetta.metro.findByStoreName("SelectedChannelStore")?.getChannelId?.();
-            const cm = ch && vendetta.metro.findByStoreName("MessageStore")?.getMessages?.(ch);
-            const hidden = new Set([...(storage.cache?.blocked ?? []), ...(storage.cache?.ignored ?? [])]);
-            const msgs: any[] = cm?.toArray?.() ?? [];
-            (globalThis as any).__nbBoot = {
-                channel: ch,
-                cachedMessages: msgs.length,
-                ready: !!cm?.ready,
-                hiddenAuthored: msgs.filter(m => hidden.has(m.author?.id)).length,
-                repliesWithHiddenPreview: msgs.filter(m => hidden.has(m.referenced_message?.author?.id ?? m.referencedMessage?.author?.id)).length,
-            };
-            devBootstrap();
-        }
+        if (__DEV__) devBootstrap();
         applyDefaults();
         // Order matters: hidden IDs first, the rest reads them.
-        for (const start of [startHidden, addInterceptor, patchRows, startLoadMore, startUnreads, startReactions, startCacheGuard, startSelfUpdate]) {
+        for (const start of [startHidden, addInterceptor, patchRows, startLoadMore, startUnreads, startReactions, startSelfUpdate]) {
             try {
                 cleanups.push(start());
             } catch (e) {
                 log.error(`${start.name} failed`, e);
             }
         }
-        if (__DEV__) (globalThis as any).__nb = { storage, rerender, dropEmptyDays };
+        if (__DEV__) (globalThis as any).__nb = { storage, rerender };
         rerender();
-        log.info("loaded");
     },
     onUnload() {
         for (const fn of cleanups.reverse()) {

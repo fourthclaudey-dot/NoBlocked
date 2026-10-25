@@ -9,8 +9,8 @@ Discord mobile mods) that takes blocked and ignored users out of your Discord.
 userscript: **[NoBlocked for Discord web](https://github.com/fourthclaudey-dot/NoBlocked-web)**.
 
 NoBlocked updates itself in the background, so Kettu shows "Enable Updates" for it — leave it
-like that. Kettu's own update check runs before a plugin starts and would let cached messages of
-hidden users flash on launch; a downloaded update becomes active on the next launch.
+like that: Kettu's own update check delays a plugin's start past the first frames of the app. A
+downloaded update becomes active on the next launch.
 
 - **Idea:** Imperator
 - **Code:** Claude (Anthropic)
@@ -36,10 +36,9 @@ hidden users flash on launch; a downloaded update becomes active on the next lau
 - **Reactions** — their reactions are subtracted from reaction counters and they are removed
   from the "who reacted" list (the plugin asks the API who reacted; costs extra requests).
   Separate switch for blocked and for ignored users.
-- **No flash on start** — Kettu starts plugins in parallel with Discord, so the last open chat
-  is drawn from Discord's on-device cache before any plugin runs. NoBlocked keeps hidden
-  messages out of that cache (and removes ones already there), starts without waiting for an
-  update check, and keeps its own copy of the block/ignore list for the first second.
+- **No flash on start** — until Discord has loaded who is blocked and ignored (about a second
+  or two after launch), the chat stays empty instead of showing messages that can't be
+  classified yet. Offline, it opens after 5 s using the list from the last session.
 - **History never gets stuck** — when a whole page of older messages is hidden, the plugin
   keeps loading until something visible arrives.
 - **Total exclusion** — one switch that overrides everything above to "hide completely".

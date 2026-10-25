@@ -1,11 +1,12 @@
 // Post-processes the rows Discord hands to the native chat list (index 0 = newest message).
-// Discord already folds blocked/ignored authors into bar rows (rowType 2/6) once it knows the
-// relationships. Before that (cold start) their messages arrive as plain rows; we fold those with
-// our cached IDs so nothing flashes. Replies to hidden users are folded the same way.
-import { log } from "./log";
+// Discord folds blocked/ignored authors into bar rows itself; we apply the display modes, fold
+// replies to hidden users the same way, merge runs of bars and drop dividers left empty.
+// Until relationships are known the chat renders no rows at all (see hidden.ts).
 import { displayCategory } from "./classify";
 import { ChannelStreamModule, FluxDispatcher, MessageStore, RowType, SelectedChannelStore } from "./discord";
+import { isReady, onHiddenChange } from "./hidden";
 import { t } from "./i18n";
+import { log } from "./log";
 import { Category, modeOf, storage } from "./settings";
 
 type Row = Record<string, any>;
@@ -163,14 +164,14 @@ function finish(items: (Row | Bar)[]): Row[] {
 
 /** "NEW MESSAGES" divider with nothing visible below it (all new messages were hidden). */
 function dropDanglingUnread(rows: Row[]): Row[] {
-    const i = rows.findIndex(r => r.rowType === "unread");
+    const i = rows.findIndex(r => r.rowType === RowType.UNREAD);
     if (i === -1) return rows;
     for (let j = 0; j < i; j++) if (rows[j].rowType === RowType.MESSAGE) return rows;
     return rows.filter((_, j) => j !== i);
 }
 
 /** Rows that only decorate the list: they never count as a day having content. */
-const META_ROWS = new Set<unknown>(["day", "unread", "load_before"]);
+const META_ROWS = new Set<unknown>([RowType.DAY, RowType.UNREAD, RowType.LOAD_BEFORE]);
 
 /**
  * Date dividers ("day" rows) whose day lost all its rows: otherwise "1 Oct" would sit right above
@@ -182,7 +183,7 @@ export function dropEmptyDays(rows: Row[]): Row[] {
     let hasContent = false;
     for (let i = 0; i < rows.length; i++) {
         const type = rows[i].rowType;
-        if (type === "day") {
+        if (type === RowType.DAY) {
             if (!hasContent) drop.add(i);
             hasContent = false;
         } else if (!META_ROWS.has(type)) {
@@ -193,21 +194,12 @@ export function dropEmptyDays(rows: Row[]): Row[] {
 }
 
 function processRows(args: any[], rows: Row[]): Row[] {
+    if (!isReady()) return [];
     const opts = args[0] ?? {};
     const channelId: string | undefined = opts.channel?.id;
     revealDenied.clear();
     mergedRuns.clear();
     const out = dropEmptyDays(dropDanglingUnread(finish(collect(rows, opts.messages?.revealedMessageId ?? null))));
-
-    if (__DEV__) {
-        const leaks = out.filter(r => r.rowType === RowType.MESSAGE && displayCategory(r.message));
-        (globalThis as any).__nbStats = { passes: ((globalThis as any).__nbStats?.passes ?? 0) + 1, at: Date.now() };
-        if (leaks.length) {
-            // kept in a global too: at cold start this runs before the debugger is connected
-            ((globalThis as any).__nbLeaks ??= []).push({ t: Date.now(), users: leaks.map(r => r.message.author?.username) });
-            log.error(`LEAK: ${leaks.length} hidden message row(s) rendered`);
-        }
-    }
 
     if (visibleListener && channelId) {
         const msgs: any[] = [];
@@ -217,12 +209,14 @@ function processRows(args: any[], rows: Row[]): Row[] {
     return out;
 }
 
-/** Make the open chat rebuild its rows without changing any data. */
+/**
+ * Make the open chat rebuild its rows. The list only rebuilds when the channel's message
+ * collection changes; re-applying the current reveal state is the lightest action that does it.
+ */
 export function rerender(channelId: string | undefined = SelectedChannelStore()?.getChannelId?.()) {
     if (!channelId) return;
-    const prev = MessageStore().getMessages(channelId)?.revealedMessageId ?? null;
-    FluxDispatcher.dispatch({ type: "MESSAGE_REVEAL", channelId, messageId: `kb-rerender-${Date.now()}`, __kb: true });
-    FluxDispatcher.dispatch({ type: "MESSAGE_REVEAL", channelId, messageId: prev, __kb: true });
+    const messageId = MessageStore().getMessages(channelId)?.revealedMessageId ?? null;
+    FluxDispatcher.dispatch({ type: "MESSAGE_REVEAL", channelId, messageId, __kb: true });
 }
 
 /** Interceptor for taps on bars. Returns true to swallow the action. */
@@ -244,7 +238,7 @@ export function patchRows() {
         log.error("createChannelStream not found, chat filtering disabled");
         return () => {};
     }
-    return vendetta.patcher.after("default", mod, (args: any[], rows: Row[]) => {
+    const unpatch = vendetta.patcher.after("default", mod, (args: any[], rows: Row[]) => {
         if (!Array.isArray(rows)) return rows;
         try {
             return processRows(args, rows);
@@ -253,5 +247,10 @@ export function patchRows() {
             return rows;
         }
     });
+    const offHidden = onHiddenChange(() => rerender());
+    return () => {
+        unpatch();
+        offHidden();
+    };
 }
 
