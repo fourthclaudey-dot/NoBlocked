@@ -1,12 +1,12 @@
 // Threads (and forum posts) created by hidden users.
 // mask — the thread stays, its title is replaced everywhere (channel list, the thread bar under a
 //        message, thread browser, the "started a thread" system message) and its creator is
-//        cleared, so the thread header has no "Started by <name>";
+//        replaced with a stand-in user, so the thread header says "Started by Blocked user";
 // hide — the thread is dropped from every payload Discord receives and removed locally (a
 //        client-side THREAD_DELETE), and messages lose their link to it.
 // Payloads are rewritten before stores see them; threads that reached ChannelStore some other way
 // (the on-device cache, a mode change) are handled by a sweep over the store.
-import { ChannelStore, FluxDispatcher } from "./discord";
+import { ChannelStore, FluxDispatcher, UserStore } from "./discord";
 import { kindOf, onHiddenChange } from "./hidden";
 import { t } from "./i18n";
 import { log } from "./log";
@@ -36,12 +36,38 @@ const MAX_DEPTH = 5;
 /** Original titles of masked threads, so they can be put back on unblock or a mode change. */
 const originalNames = new Map<string, string>();
 /**
- * Creators of masked threads. Their owner field is cleared so the thread header doesn't say
- * "Started by <name>"; this map keeps the thread recognisable as theirs.
+ * Creators of masked threads. Their owner field points at a stand-in user instead, so the thread
+ * header says "Started by Blocked user"; this map keeps the thread recognisable as theirs.
  */
 const originalOwners = new Map<string, { key: "owner_id" | "ownerId"; id: string }>();
 
-const ownerOf = (c: any): string | undefined => c?.owner_id ?? c?.ownerId ?? (c?.id ? originalOwners.get(c.id)?.id : undefined);
+/** Stand-in users shown as the creator of a masked thread. Ids no real account can have. */
+const STAND_IN: Record<Kind, string> = { blocked: "1000000000000000001", ignored: "1000000000000000002" };
+const isStandIn = (id: any) => id === STAND_IN.blocked || id === STAND_IN.ignored;
+
+function ownerOf(c: any): string | undefined {
+    const raw = c?.owner_id ?? c?.ownerId;
+    if (raw && !isStandIn(raw)) return raw;
+    return c?.id ? originalOwners.get(c.id)?.id : undefined;
+}
+
+/** A user record for a stand-in id, built on the real UserRecord prototype so methods keep working. */
+const standInUsers = new Map<string, any>();
+function standInUser(id: string) {
+    const kind: Kind = id === STAND_IN.blocked ? "blocked" : "ignored";
+    const name = kind === "blocked" ? t().userBlocked : t().userIgnored;
+    let user = standInUsers.get(id);
+    if (!user || user.username !== name) {
+        const me = UserStore().getCurrentUser();
+        user = Object.assign(Object.create(me ? Object.getPrototypeOf(me) : Object.prototype), me ?? {}, {
+            id, username: name, globalName: name, global_name: name, discriminator: "0",
+            avatar: null, avatarDecorationData: null, banner: null, bot: false, system: false,
+            publicFlags: 0, flags: 0, premiumType: 0, clan: null, primaryGuild: null,
+        });
+        standInUsers.set(id, user);
+    }
+    return user;
+}
 const isThread = (c: any) => !!c && THREAD_TYPES.has(c.type) && typeof c.name === "string" && !!ownerOf(c);
 
 /** Hidden kind of the thread's creator, if the thread is to be treated at all. */
@@ -60,9 +86,9 @@ function mask(c: any, kind: Kind) {
         c.name = ph;
     }
     for (const key of ["owner_id", "ownerId"] as const) {
-        if (!c[key]) continue;
+        if (!c[key] || isStandIn(c[key])) continue;
         originalOwners.set(c.id, { key, id: c[key] });
-        c[key] = null;
+        c[key] = STAND_IN[kind];
     }
 }
 
@@ -214,6 +240,11 @@ export function startThreads() {
             if (kind && threadModeOf(kind) === "mask") mask(c, kind);
             return c;
         }));
+    // "Started by …" resolves the creator through UserStore: answer for the stand-ins.
+    const US = UserStore();
+    if (typeof US?.getUser === "function") {
+        unpatches.push(vendetta.patcher.after("getUser", US, ([id]: any[], user: any) => (isStandIn(id) ? standInUser(id) : user)));
+    }
     FluxDispatcher.subscribe("CONNECTION_OPEN", refreshThreads);
     const offHidden = onHiddenChange(refreshThreads);
     refreshThreads();
