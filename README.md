@@ -34,7 +34,8 @@ downloaded update becomes active on the next launch.
   updates (a new last message id with no author) are checked before they can light a channel
   up. Configurable per category.
 - **Threads they create** — by default the thread stays but its title is replaced ("Thread of a
-  blocked user"), in the channel list, under the message and in the "started a thread" notice.
+  blocked user"), in the channel list, under the message and in the "started a thread" notice,
+  and the thread no longer says who started it.
   Or hide such threads completely. Separate choice for blocked and ignored users.
 - **Reactions** — their reactions are subtracted from reaction counters and they are removed
   from the "who reacted" list (the plugin asks the API who reacted; costs extra requests).

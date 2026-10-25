@@ -1,6 +1,7 @@
 // Threads (and forum posts) created by hidden users.
 // mask — the thread stays, its title is replaced everywhere (channel list, the thread bar under a
-//        message, thread browser, the "started a thread" system message);
+//        message, thread browser, the "started a thread" system message) and its creator is
+//        cleared, so the thread header has no "Started by <name>";
 // hide — the thread is dropped from every payload Discord receives and removed locally (a
 //        client-side THREAD_DELETE), and messages lose their link to it.
 // Payloads are rewritten before stores see them; threads that reached ChannelStore some other way
@@ -34,8 +35,13 @@ const MAX_DEPTH = 5;
 
 /** Original titles of masked threads, so they can be put back on unblock or a mode change. */
 const originalNames = new Map<string, string>();
+/**
+ * Creators of masked threads. Their owner field is cleared so the thread header doesn't say
+ * "Started by <name>"; this map keeps the thread recognisable as theirs.
+ */
+const originalOwners = new Map<string, { key: "owner_id" | "ownerId"; id: string }>();
 
-const ownerOf = (c: any): string | undefined => c?.owner_id ?? c?.ownerId;
+const ownerOf = (c: any): string | undefined => c?.owner_id ?? c?.ownerId ?? (c?.id ? originalOwners.get(c.id)?.id : undefined);
 const isThread = (c: any) => !!c && THREAD_TYPES.has(c.type) && typeof c.name === "string" && !!ownerOf(c);
 
 /** Hidden kind of the thread's creator, if the thread is to be treated at all. */
@@ -49,9 +55,33 @@ function placeholder(kind: Kind) {
 
 function mask(c: any, kind: Kind) {
     const ph = placeholder(kind);
-    if (c.name === ph) return;
-    originalNames.set(c.id, c.name);
-    c.name = ph;
+    if (c.name !== ph) {
+        originalNames.set(c.id, c.name);
+        c.name = ph;
+    }
+    for (const key of ["owner_id", "ownerId"] as const) {
+        if (!c[key]) continue;
+        originalOwners.set(c.id, { key, id: c[key] });
+        c[key] = null;
+    }
+}
+
+/** Puts back what mask() replaced (after unblock/unignore). True if anything changed. */
+function unmask(c: any): boolean {
+    let changed = false;
+    const name = originalNames.get(c.id);
+    if (name !== undefined) {
+        c.name = name;
+        originalNames.delete(c.id);
+        changed = true;
+    }
+    const owner = originalOwners.get(c.id);
+    if (owner) {
+        c[owner.key] = owner.id;
+        originalOwners.delete(c.id);
+        changed = true;
+    }
+    return changed;
 }
 
 const isMessage = (m: any) => !!m && typeof m.id === "string" && !!m.author && "content" in m;
@@ -139,7 +169,7 @@ function knownThreads(): any[] {
             }
         }
     }
-    for (const id of originalNames.keys()) add(CS.getChannel(id));
+    for (const id of new Set([...originalNames.keys(), ...originalOwners.keys()])) add(CS.getChannel(id));
     return [...out.values()];
 }
 
@@ -148,18 +178,13 @@ function sweep() {
     for (const c of knownThreads()) {
         const kind = threadKind(c);
         if (!kind) {
-            const original = originalNames.get(c.id);
-            if (original !== undefined) {
-                c.name = original;
-                originalNames.delete(c.id);
-                restored++;
-            }
+            if (unmask(c)) restored++;
             continue;
         }
         if (threadModeOf(kind) === "mask") {
-            const before = c.name;
+            const before = c.name + ownerOf(c) + (c.owner_id ?? c.ownerId);
             mask(c, kind);
-            if (c.name !== before) masked++;
+            if (c.name + ownerOf(c) + (c.owner_id ?? c.ownerId) !== before) masked++;
         } else {
             FluxDispatcher.dispatch({
                 type: "THREAD_DELETE",
