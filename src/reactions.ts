@@ -31,9 +31,18 @@ let running = 0;
 
 // ---- persistence ----------------------------------------------------------------------------
 
-const PERSIST_MAX = 2000;
-type Persisted = Record<string, { r: [string, boolean][]; c?: number; a: number }>;
+// Checks are kept across launches so a chat reopened later shows its reactions at once. When the
+// store is full, the entries used least recently are dropped.
+
+const PERSIST_MAX = 1000;
+type Persisted = Record<string, { r: [string, boolean][]; c?: number; a: number; u?: number }>;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** key -> when the result was last used (drawn, applied to a payload or checked). */
+const lastUsed = new Map<string, number>();
+
+function touch(key: string) {
+    lastUsed.set(key, Date.now());
+}
 
 function loadPersisted() {
     const saved: Persisted = (storage as any).reactionCache ?? {};
@@ -41,17 +50,21 @@ function loadPersisted() {
         if (!Array.isArray(e?.r)) continue;
         known.set(key, new Map(e.r));
         checkedAt.set(key, e.a ?? 0);
+        lastUsed.set(key, e.u ?? e.a ?? 0);
         if (typeof e.c === "number") rawCounts.set(key, e.c);
     }
+    delete (storage as any).reactionCacheMirror;
 }
 
 function savePersisted() {
     saveTimer = null;
-    const keys = [...checkedAt.entries()].sort((x, y) => y[1] - x[1]).slice(0, PERSIST_MAX).map(([k]) => k);
+    const keys = [...known.keys()].sort((x, y) => (lastUsed.get(y) ?? 0) - (lastUsed.get(x) ?? 0));
+    for (const key of keys.slice(PERSIST_MAX)) { // over the limit: forget the least recently used
+        known.delete(key); checkedAt.delete(key); rawCounts.delete(key); lastUsed.delete(key);
+    }
     const out: Persisted = {};
-    for (const key of keys) {
-        const m = known.get(key);
-        if (m) out[key] = { r: [...m], c: rawCounts.get(key), a: checkedAt.get(key) ?? 0 };
+    for (const key of keys.slice(0, PERSIST_MAX)) {
+        out[key] = { r: [...known.get(key)!], c: rawCounts.get(key), a: checkedAt.get(key) ?? 0, u: lastUsed.get(key) };
     }
     (storage as any).reactionCache = out;
 }
@@ -130,6 +143,7 @@ async function probe(channelId: string, messageId: string, reaction: any, t: Rea
     }
     known.set(key, result);
     checkedAt.set(key, Date.now());
+    touch(key);
     saveSoon();
 
     const done = applied.get(key) ?? new Set<string>();
@@ -200,6 +214,7 @@ function adjustPayload(message: any) {
                 checkedAt.delete(key);
             }
             rawCounts.set(key, raw);
+            if (known.has(key)) touch(key);
             const ids = hiddenReactors(key);
             applied.set(key, new Set(ids)); // fresh server payload: exactly these get subtracted below
             const n = ids.length;
@@ -287,6 +302,7 @@ let shownCopies = new WeakMap<object, { sig: string; copy: any }>();
 
 function verified(key: string, users: string[]) {
     const m = known.get(key);
+    if (m) touch(key);
     return !!m && users.every(id => m.has(id));
 }
 
