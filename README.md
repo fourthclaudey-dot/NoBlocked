@@ -41,7 +41,9 @@ downloaded update becomes active on the next launch.
   ignored users' messages (for threads under 100 messages: one API request per thread).
 - **Reactions** — their reactions are subtracted from reaction counters and they are removed
   from the "who reacted" list (the plugin asks the API who reacted; costs extra requests).
-  Separate switch for blocked and for ignored users.
+  A reaction appears only once it has been checked, so one left by a hidden user never
+  flashes; results are remembered across launches. Separate switch for blocked and for
+  ignored users.
 - **No flash on start** — until Discord has loaded who is blocked and ignored (about a second
   or two after launch), the chat stays empty instead of showing messages that can't be
   classified yet. Offline, it opens after 5 s using the list from the last session.

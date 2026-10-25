@@ -27,6 +27,12 @@ export function onVisibleMessages(fn: typeof visibleListener) {
     visibleListener = fn;
 }
 
+let messageTransform: ((channelId: string, message: any) => any) | null = null;
+/** Lets a feature show a different copy of a visible message (e.g. without unverified reactions). */
+export function onRowMessage(fn: typeof messageTransform) {
+    messageTransform = fn;
+}
+
 function barText(cat: Category, n: number) {
     const s = t();
     return cat === "replies" ? s.repliesBar(n) : cat === "blocked" ? s.blockedBar(n) : s.ignoredBar(n);
@@ -205,6 +211,16 @@ function processRows(args: any[], rows: Row[]): Row[] {
         const msgs: any[] = [];
         for (const r of out) if (r.rowType === RowType.MESSAGE && r.message) msgs.push(r.message);
         try { visibleListener(channelId, msgs); } catch (e) { log.error("visible listener", e); }
+    }
+    if (messageTransform && channelId) {
+        for (let i = 0; i < out.length; i++) {
+            const r = out[i];
+            if (r.rowType !== RowType.MESSAGE || !r.message) continue;
+            try {
+                const m = messageTransform(channelId, r.message);
+                if (m !== r.message) out[i] = { ...r, message: m };
+            } catch (e) { log.error("row message transform", e); }
+        }
     }
     return out;
 }
