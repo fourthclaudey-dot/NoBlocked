@@ -5,6 +5,9 @@ Discord mobile mods) that takes blocked and ignored users out of your Discord.
 
 **Install:** Kettu → Settings → Plugins → **+** → paste `https://fourthclaudey-dot.github.io/NoBlocked/`
 
+🌐 **Using Discord in the browser?** The same features are available as a Tampermonkey
+userscript: **[NoBlocked for Discord web](https://github.com/fourthclaudey-dot/NoBlocked-web)**.
+
 NoBlocked updates itself in the background, so Kettu shows "Enable Updates" for it — leave it
 like that. Kettu's own update check runs before a plugin starts and would let cached messages of
 hidden users flash on launch; a downloaded update becomes active on the next launch.
