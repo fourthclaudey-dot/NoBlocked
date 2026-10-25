@@ -1,7 +1,8 @@
 // Settings page built from Discord's current table components (the ones its own settings use).
 import { t } from "./i18n";
 import { rerender } from "./rows";
-import { Category, Mode, storage } from "./settings";
+import { Category, Mode, storage, ThreadMode } from "./settings";
+import { refreshThreads } from "./threads";
 
 const { React, ReactNative } = vendetta.metro.common;
 const { findByProps } = vendetta.metro;
@@ -29,7 +30,7 @@ function ModeGroup({ title, value, options, onChange }: { title: string; value: 
 }
 
 function CategorySettings({ cat, title, options }: { cat: Category; title: string; options: ModeKey[] }) {
-    const s = storage[cat] as { mode: string; unread: boolean; reactions?: boolean };
+    const s = storage[cat] as { mode: string; unread: boolean; reactions?: boolean; threads?: ThreadMode };
     const str = t();
     const set = (key: "unread" | "reactions") => (v: boolean) => { s[key] = v; changed(); };
     return (
@@ -41,6 +42,16 @@ function CategorySettings({ cat, title, options }: { cat: Category; title: strin
                     <TableSwitchRow label={str.reactions} subLabel={str.reactionsNote} value={storage.total || !!s.reactions} disabled={storage.total} onValueChange={set("reactions")} />
                 )}
             </TableRowGroup>
+            {cat !== "replies" && (
+                <TableRadioGroup
+                    title={str.threads}
+                    value={storage.total ? "hide" : s.threads}
+                    onChange={(v: ThreadMode) => { if (!storage.total) { s.threads = v; refreshThreads(); changed(); } }}
+                >
+                    <TableRadioRow label={str.threadModes.mask} value="mask" disabled={storage.total} />
+                    <TableRadioRow label={str.threadModes.hide} value="hide" disabled={storage.total} />
+                </TableRadioGroup>
+            )}
         </>
     );
 }

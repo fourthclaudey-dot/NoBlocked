@@ -6,13 +6,14 @@ import { interceptReactions, startReactions } from "./reactions";
 import { interceptReveal, patchRows, rerender } from "./rows";
 import { startSelfUpdate } from "./selfupdate";
 import { applyDefaults, storage } from "./settings";
+import { interceptThreads, startThreads } from "./threads";
 import { SettingsPage } from "./ui";
 import { interceptPassive, startUnreads } from "./unreads";
 
 /** True swallows the action. */
 function interceptor(action: any): boolean {
     try {
-        return interceptReveal(action) || interceptReactions(action) || interceptPassive(action);
+        return interceptThreads(action) || interceptReveal(action) || interceptReactions(action) || interceptPassive(action);
     } catch (e) {
         log.error("interceptor", e);
         return false;
@@ -57,7 +58,7 @@ export default {
         if (__DEV__) devBootstrap();
         applyDefaults();
         // Order matters: hidden IDs first, the rest reads them.
-        for (const start of [startHidden, addInterceptor, patchRows, startLoadMore, startUnreads, startReactions, startSelfUpdate]) {
+        for (const start of [startHidden, addInterceptor, patchRows, startLoadMore, startUnreads, startReactions, startThreads, startSelfUpdate]) {
             try {
                 cleanups.push(start());
             } catch (e) {
