@@ -6,6 +6,7 @@ import { interceptReactions, startReactions } from "./reactions";
 import { interceptReveal, patchRows, rerender } from "./rows";
 import { startSelfUpdate } from "./selfupdate";
 import { applyDefaults, storage } from "./settings";
+import { startThreadCount } from "./threadcount";
 import { interceptThreads, startThreads } from "./threads";
 import { SettingsPage } from "./ui";
 import { interceptPassive, startUnreads } from "./unreads";
@@ -58,7 +59,7 @@ export default {
         if (__DEV__) devBootstrap();
         applyDefaults();
         // Order matters: hidden IDs first, the rest reads them.
-        for (const start of [startHidden, addInterceptor, patchRows, startLoadMore, startUnreads, startReactions, startThreads, startSelfUpdate]) {
+        for (const start of [startHidden, addInterceptor, patchRows, startLoadMore, startUnreads, startReactions, startThreads, startThreadCount, startSelfUpdate]) {
             try {
                 cleanups.push(start());
             } catch (e) {

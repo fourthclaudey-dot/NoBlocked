@@ -37,6 +37,8 @@ downloaded update becomes active on the next launch.
   blocked user"), in the channel list, under the message and in the "started a thread" notice,
   and the thread says it was started by "Blocked user" / "Ignored user".
   Or hide such threads completely. Separate choice for blocked and ignored users.
+- **Thread message counts** — the number next to a thread's title doesn't count blocked and
+  ignored users' messages (for threads under 100 messages: one API request per thread).
 - **Reactions** — their reactions are subtracted from reaction counters and they are removed
   from the "who reacted" list (the plugin asks the API who reacted; costs extra requests).
   Separate switch for blocked and for ignored users.
