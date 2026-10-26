@@ -9,7 +9,7 @@
 // put there would flash). Results are kept across launches and reused while the server's count
 // for that reaction is unchanged.
 import { log } from "./log";
-import { ChannelStore, FluxDispatcher, HTTP, MessageReactionsStore } from "./discord";
+import { ChannelStore, FluxDispatcher, HTTP, MessageReactionsStore, MessageStore, UserStore } from "./discord";
 import { hiddenIds, kindOf, onHiddenChange } from "./hidden";
 import { onRowMessage, onVisibleMessages, rerender } from "./rows";
 import { hidesReactions, storage } from "./settings";
@@ -201,6 +201,13 @@ function schedule(channelId: string, messages: any[]) {
 const rawCountOf = (r: any, t: ReactionType): number =>
     (t === 1 ? r.burst_count ?? r.count_details?.burst : r.count_details?.normal ?? r.count) ?? 0;
 
+/** A reaction as the store has it before the intercepted action is applied. */
+function storeReaction(channelId: string, messageId: string, emoji: any, t: ReactionType) {
+    const k = emojiKey(emoji);
+    const r = MessageStore().getMessage(channelId, messageId)?.reactions?.find((x: any) => emojiKey(x.emoji) === k);
+    return { count: r ? rawCountOf(r, t) : 0, mine: !!(t === 1 ? r?.me_burst : r?.me) };
+}
+
 /** Subtract already-known hidden reactions from raw message payloads before stores see them. */
 function adjustPayload(message: any) {
     if (!message?.reactions?.length) return;
@@ -240,9 +247,27 @@ export function interceptReactions(action: any): boolean {
         case "MESSAGE_REACTION_REMOVE": {
             const t: ReactionType = action.reactionType === 1 || action.burst ? 1 : 0;
             const key = keyOf(action.messageId, action.emoji, t);
+            const add = action.type === "MESSAGE_REACTION_ADD";
+            const before = storeReaction(action.channelId, action.messageId, action.emoji, t);
+            // Our own reaction arrives twice (optimistic, then the gateway echo); the store ignores
+            // the repeat, so must we.
+            const repeat = action.userId === UserStore().getCurrentUser()?.id && before.mine === add;
             // Track the server's count live so the next payload doesn't look like a change.
-            if (rawCounts.has(key)) rawCounts.set(key, Math.max(0, rawCounts.get(key)! + (action.type === "MESSAGE_REACTION_ADD" ? 1 : -1)));
-            if (!reactionHidden(action.userId)) return false;
+            if (rawCounts.has(key) && !repeat) rawCounts.set(key, Math.max(0, rawCounts.get(key)! + (add ? 1 : -1)));
+            if (!reactionHidden(action.userId)) {
+                // A visible user starts a new reaction: no hidden user is in it, nothing to check.
+                if (add && !repeat && before.count === 0 && !applied.get(key)?.size) {
+                    const users = candidates(action.channelId);
+                    if (users.length) {
+                        known.set(key, new Map(users.map(id => [id, false])));
+                        checkedAt.set(key, Date.now());
+                        rawCounts.set(key, 1);
+                        touch(key);
+                        saveSoon();
+                    }
+                }
+                return false;
+            }
             const m = known.get(key) ?? new Map<string, boolean>();
             m.set(action.userId, action.type === "MESSAGE_REACTION_ADD");
             known.set(key, m);

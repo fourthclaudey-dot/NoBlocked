@@ -36,6 +36,9 @@ function pickOriginalIfAsked() {
         }
         sleep(400);
     }
+    // A missed tap can leave the clone (another Android user) in front: never carry on silently.
+    const top = sh("dumpsys activity activities | grep topResumedActivity || true").trim();
+    throw new Error(`original ${PKG} (user ${USER}) is not in front: ${top}`);
 }
 
 const [cmd, ...rest] = process.argv.slice(2);

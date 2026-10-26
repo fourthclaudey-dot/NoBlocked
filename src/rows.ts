@@ -28,6 +28,11 @@ export function onVisibleMessages(fn: typeof visibleListener) {
 }
 
 let messageTransform: ((channelId: string, message: any) => any) | null = null;
+/** Message object last handed to the native list, per message id, for the chat drawn last. */
+let drawn = new Map<string, any>();
+let drawnChannel: string | null = null;
+/** Row changeType Discord uses for "this message changed, redraw it". */
+const ROW_UPDATED = 2;
 /** Lets a feature show a different copy of a visible message (e.g. without unverified reactions). */
 export function onRowMessage(fn: typeof messageTransform) {
     messageTransform = fn;
@@ -213,14 +218,23 @@ function processRows(args: any[], rows: Row[]): Row[] {
         try { visibleListener(channelId, msgs); } catch (e) { log.error("visible listener", e); }
     }
     if (messageTransform && channelId) {
+        const prev = drawnChannel === channelId ? drawn : new Map<string, any>();
+        const next = new Map<string, any>();
         for (let i = 0; i < out.length; i++) {
             const r = out[i];
             if (r.rowType !== RowType.MESSAGE || !r.message) continue;
             try {
                 const m = messageTransform(channelId, r.message);
-                if (m !== r.message) out[i] = { ...r, message: m };
+                next.set(r.message.id, m);
+                const was = prev.get(r.message.id);
+                // The native list only redraws rows flagged as changed; Discord flags a row only
+                // when its store record changes, not when we swap in a different copy.
+                const swapped = was !== undefined && was !== m && !r.changeType;
+                if (m !== r.message || swapped) out[i] = { ...r, message: m, ...(swapped ? { changeType: ROW_UPDATED } : {}) };
             } catch (e) { log.error("row message transform", e); }
         }
+        drawn = next;
+        drawnChannel = channelId;
     }
     return out;
 }
