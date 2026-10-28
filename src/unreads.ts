@@ -9,7 +9,7 @@
 // 4. Passive guild updates carry no author: held back until one request shows who wrote.
 import { log } from "./log";
 import { silentForUnread } from "./classify";
-import { AckActions, ChannelStore, FluxDispatcher, HTTP, ReadStateStore, SelectedChannelStore, UserGuildSettingsStore } from "./discord";
+import { AckActions, ChannelStore, FluxDispatcher, HTTP, MessageStore, ReadStateStore, SelectedChannelStore, UserGuildSettingsStore } from "./discord";
 import { onHiddenChange } from "./hidden";
 import { storage } from "./settings";
 
@@ -213,8 +213,9 @@ export function interceptPassive(action: any): boolean {
     action[key] = action[key].filter((c: any) => {
         const last: string | undefined = c?.lastMessageId ?? c?.last_message_id;
         if (!c?.id || !last || c.id === selected || RS.hasUnread(c.id)) return true;
+        // Without a local read state there's nothing to check the update against: let it through.
         const local = RS.lastMessageId(c.id);
-        if (local && !snowflakeGreater(last, local)) return true;
+        if (!local || !snowflakeGreater(last, local)) return true;
         held.push(c);
         return false;
     });
@@ -222,14 +223,93 @@ export function interceptPassive(action: any): boolean {
     return false;
 }
 
+// ---- what the open chat says is new --------------------------------------------------------
+// Read state comes from the server and counts hidden users' messages too, so a chat opened at
+// launch got a "25+ new messages since 12:05" banner and a NEW MESSAGES line even when only
+// blocked users had written. For chats whose messages are loaded, the unread getters are
+// answered from the visible messages instead.
+
+interface UnreadView { oldestId: string | null; oldestTs: number; count: number; estimated: boolean }
+const viewCache = new WeakMap<object, { anchor: string; view: UnreadView | null }>();
+/** Bumped when who is hidden changes, so cached views are recomputed. */
+let hiddenVersion = 0;
+const DISCORD_EPOCH_MS = 1420070400000;
+
+const snowflakeTs = (id: string) => Number((BigInt(id) >> BigInt(22)) + BigInt(DISCORD_EPOCH_MS));
+const notOlder = (a: string, b: string) => (a.length !== b.length ? a.length > b.length : a >= b);
+
+/** Unread state without hidden messages, or null when the loaded messages can't tell. */
+/** Set while computing a view: the patched getters then answer with Discord's own values. */
+let computing = false;
+
+function unreadView(RS: any, channelId: string): UnreadView | null {
+    if (computing) return null;
+    computing = true;
+    try { return computeView(RS, channelId); } finally { computing = false; }
+}
+
+function computeView(RS: any, channelId: string): UnreadView | null {
+    const anchor: string | null = RS.getOldestUnreadMessageId(channelId);
+    if (!anchor) return null;
+    const cm = MessageStore().getMessages(channelId);
+    const msgs: any[] = cm?.toArray?.() ?? [];
+    if (!msgs.length) return null;
+    const hit = viewCache.get(cm);
+    if (hit?.anchor === anchor + "|" + hiddenVersion) return hit.view;
+
+    // Only when the loaded messages reach the channel's newest one; otherwise new messages are missing.
+    const newest: string | null = RS.lastMessageId(channelId);
+    if (cm.hasMoreAfter || !newest || !notOlder(msgs[msgs.length - 1].id, newest)) return null;
+    const unread = msgs.filter(m => notOlder(m.id, anchor));
+    // All unread messages are loaded only if something at or before the anchor is loaded too.
+    const complete = !notOlder(msgs[0].id, anchor) || msgs[0].id === anchor;
+    const visible = unread.filter(m => !silentForUnread(m));
+    let view: UnreadView | null = null;
+    // Hidden messages can only take away from what Discord says, never add to it.
+    const origCount: number = RS.getUnreadCount(channelId) ?? 0;
+    const origEstimated = !!RS.isEstimated(channelId);
+    if (complete) {
+        const first = visible[0];
+        view = first
+            ? { oldestId: first.id, oldestTs: snowflakeTs(first.id), count: Math.min(origCount, visible.length), estimated: origEstimated && visible.length >= origCount }
+            : { oldestId: null, oldestTs: 0, count: 0, estimated: false };
+    } else if (unread.length !== visible.length) {
+        // Older unread messages aren't loaded: keep the anchor, just don't count hidden ones we see.
+        view = { oldestId: anchor, oldestTs: RS.getOldestUnreadTimestamp(channelId), count: Math.max(0, origCount - (unread.length - visible.length)), estimated: origEstimated };
+    }
+    viewCache.set(cm, { anchor: anchor + "|" + hiddenVersion, view });
+    return view;
+}
+
+function patchReadState() {
+    const RS = ReadStateStore();
+    const names = ["getOldestUnreadMessageId", "getOldestUnreadTimestamp", "getUnreadCount", "isEstimated", "hasUnread"];
+    if (!names.every(n => typeof RS?.[n] === "function")) {
+        log.warn("ReadStateStore getters changed, unread banner not adjusted");
+        return () => {};
+    }
+    const view = (args: any[]) => (typeof args[0] === "string" ? unreadView(RS, args[0]) : null);
+    const p = vendetta.patcher;
+    const unpatches = [
+        p.after("getOldestUnreadMessageId", RS, (a: any[], r: any) => { const v = view(a); return v ? v.oldestId : r; }),
+        p.after("getOldestUnreadTimestamp", RS, (a: any[], r: any) => { const v = view(a); return v ? v.oldestTs : r; }),
+        p.after("getUnreadCount", RS, (a: any[], r: any) => { const v = view(a); return v ? v.count : r; }),
+        p.after("isEstimated", RS, (a: any[], r: any) => { const v = view(a); return v ? v.estimated : r; }),
+        p.after("hasUnread", RS, (a: any[], r: any) => { if (!r) return r; const v = view(a); return v ? v.count > 0 : r; }),
+    ];
+    return () => unpatches.forEach(u => u());
+}
+
 export function startUnreads() {
     const unwrap = wrapStoreHandlers();
+    const unpatchReadState = patchReadState();
     FluxDispatcher.subscribe("MESSAGE_CREATE", onMessageCreate);
     FluxDispatcher.subscribe("CONNECTION_OPEN", onConnectionOpen);
-    const offHidden = onHiddenChange(() => scheduleReconcile(1500));
+    const offHidden = onHiddenChange(() => { hiddenVersion++; scheduleReconcile(1500); });
     scheduleReconcile(1500);
     return () => {
         unwrap();
+        unpatchReadState();
         offHidden();
         FluxDispatcher.unsubscribe("MESSAGE_CREATE", onMessageCreate);
         FluxDispatcher.unsubscribe("CONNECTION_OPEN", onConnectionOpen);

@@ -355,7 +355,14 @@ export function startReactions() {
     onVisibleMessages(schedule);
     onRowMessage(withCheckedReactions);
     const unpatchList = patchReactorList();
+    // hidden.ts also notifies when relationships finish loading with the same list (markReady);
+    // only an actual change of who is hidden invalidates the checks loaded from storage.
+    const hiddenSig = () => hiddenIds().slice().sort().join(",");
+    let lastSig = hiddenSig();
     const off = onHiddenChange(() => {
+        const sig = hiddenSig();
+        if (sig === lastSig) return;
+        lastSig = sig;
         known.clear(); checkedAt.clear(); applied.clear(); rawCounts.clear();
         filteredCache = new WeakMap();
         shownCopies = new WeakMap();
