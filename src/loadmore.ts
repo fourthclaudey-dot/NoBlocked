@@ -1,10 +1,11 @@
 // The native list asks for older messages once, when its top is reached. If that page consists
 // only of hidden messages no new rows appear, the list never asks again and history gets stuck.
 // We keep fetching on our own until a page brings something visible (or history ends).
-import { log } from "./log";
-import { FluxDispatcher, MessageActions, MessageStore } from "./discord";
 import { displayCategory } from "./classify";
+import { FluxDispatcher, MessageActions, MessageStore } from "./discord";
+import { log } from "./log";
 import { modeOf, storage } from "./settings";
+import { isNewer } from "./util";
 
 /** Visible messages we want to have gained before giving the list back to the user. */
 const MIN_VISIBLE = 10;
@@ -32,7 +33,7 @@ function onLoadSuccess(action: any) {
     }
 
     // Payload is newest-first; continue right before its oldest message.
-    const oldest = messages.reduce((a: any, m: any) => (snowflakeLess(m.id, a.id) ? m : a), messages[0]);
+    const oldest = messages.reduce((a: any, m: any) => (isNewer(a.id, m.id) ? m : a), messages[0]);
     chain.fetches++;
     chains.set(channelId, chain);
     setTimeout(() => {
@@ -41,11 +42,6 @@ function onLoadSuccess(action: any) {
         log.info(`page had ${visible} visible, fetching more before ${oldest.id} (#${chain.fetches})`);
         MessageActions().fetchMessages({ channelId, before: oldest.id, limit: 100 });
     }, 50);
-}
-
-/** Snowflake comparison without relying on BigInt support. */
-function snowflakeLess(a: string, b: string) {
-    return a.length !== b.length ? a.length < b.length : a < b;
 }
 
 export function startLoadMore() {

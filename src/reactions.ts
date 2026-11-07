@@ -8,11 +8,12 @@
 // Until a reaction has been checked it is not drawn at all (otherwise a pill only a blocked user
 // put there would flash). Results are kept across launches and reused while the server's count
 // for that reaction is unchanged.
-import { log } from "./log";
-import { ChannelStore, FluxDispatcher, HTTP, MessageReactionsStore, MessageStore, UserStore } from "./discord";
+import { ChannelStore, FluxDispatcher, MessageReactionsStore, MessageStore, UserStore } from "./discord";
 import { hiddenIds, kindOf, onHiddenChange } from "./hidden";
+import { log } from "./log";
 import { onRowMessage, onVisibleMessages, rerender } from "./rows";
 import { hidesReactions, storage } from "./settings";
+import { apiGet, idBefore } from "./util";
 
 type ReactionType = 0 | 1; // normal, burst ("super")
 
@@ -86,10 +87,6 @@ function reactionHidden(userId: string): boolean {
     return !!kind && hidesReactions(kind);
 }
 
-function decSnowflake(id: string) {
-    return (BigInt(id) - BigInt(1)).toString();
-}
-
 /** Hidden users that could have reacted in this channel (DMs: only participants). */
 function candidates(channelId: string): string[] {
     const ids = hiddenIds().filter(reactionHidden);
@@ -102,18 +99,6 @@ function hiddenReactors(key: string): string[] {
     const m = known.get(key);
     if (!m) return [];
     return [...m].filter(([id, reacted]) => reacted && reactionHidden(id)).map(([id]) => id);
-}
-
-async function request(url: string, query: Record<string, any>): Promise<any[]> {
-    for (let attempt = 0; attempt < 4; attempt++) {
-        try {
-            return (await HTTP().get({ url, query })).body ?? [];
-        } catch (e: any) {
-            if (e?.status !== 429) throw e;
-            await new Promise(r => setTimeout(r, Math.max(500, (e.body?.retry_after ?? 1) * 1000)));
-        }
-    }
-    return [];
 }
 
 async function probe(channelId: string, messageId: string, reaction: any, t: ReactionType, users: string[]) {
@@ -129,7 +114,7 @@ async function probe(channelId: string, messageId: string, reaction: any, t: Rea
         let after: string | undefined;
         const all = new Set<string>();
         for (let p = 0; p < pages; p++) {
-            const list = await request(url, { limit: 100, type: t, ...(after ? { after } : {}) });
+            const list = await apiGet(url, { limit: 100, type: t, ...(after ? { after } : {}) });
             list.forEach(u => all.add(u.id));
             if (list.length < 100) break;
             after = list[list.length - 1].id;
@@ -137,7 +122,7 @@ async function probe(channelId: string, messageId: string, reaction: any, t: Rea
         for (const id of users) result.set(id, all.has(id));
     } else {
         for (const id of users) {
-            const list = await request(url, { limit: 1, type: t, after: decSnowflake(id) });
+            const list = await apiGet(url, { limit: 1, type: t, after: idBefore(id) });
             result.set(id, list[0]?.id === id);
         }
     }

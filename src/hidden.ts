@@ -1,7 +1,7 @@
 // Who is hidden. Discord learns relationships from the gateway (~1.5 s after start); until then the
 // chat stays blank (see rows.ts) rather than showing messages we can't classify yet. Offline, the
 // chat opens after READY_TIMEOUT_MS with the persisted list from the last session.
-import { FluxDispatcher, GatewayConnectionStore, RelationshipStore, RELATIONSHIP_EVENTS } from "./discord";
+import { FluxDispatcher, GatewayConnectionStore, RELATIONSHIP_EVENTS,RelationshipStore } from "./discord";
 import { log } from "./log";
 import { Kind, storage } from "./settings";
 

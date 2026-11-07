@@ -1,17 +1,18 @@
 // Keeps hidden messages from making chats look new.
-// 1. Live: the stores that compute unread dots, mention badges, DM bumps, previews and in-app
-//    notifications simply never see a silenced MESSAGE_CREATE (the message itself still reaches
-//    MessageStore, so bars keep working).
-// 2. Server: if the chat was fully read, we ack the silenced message so other devices and the
-//    next app start agree.
-// 3. Startup: Discord's own unread state comes from the server; channels that only got hidden
-//    messages while we were away are checked (one request each) and acked.
+// 1. Live: the stores behind unread dots, badges, DM order, previews and in-app notifications
+//    never see a silenced MESSAGE_CREATE (MessageStore still does, so bars keep working).
+// 2. Server: if the chat was read before, the silenced message is acked, so other devices and
+//    the next launch agree.
+// 3. Startup: chats that only got hidden messages while the app was closed are checked (one
+//    request each) and acked.
 // 4. Passive guild updates carry no author: held back until one request shows who wrote.
-import { log } from "./log";
+// 5. The open chat's unread getters (banner, NEW MESSAGES line) skip hidden messages.
 import { silentForUnread } from "./classify";
-import { AckActions, ChannelStore, FluxDispatcher, HTTP, MessageStore, ReadStateStore, SelectedChannelStore, UserGuildSettingsStore } from "./discord";
+import { AckActions, ChannelStore, FluxDispatcher, MessageStore, ReadStateStore, SelectedChannelStore, storeNodes, UserGuildSettingsStore } from "./discord";
 import { onHiddenChange } from "./hidden";
+import { log } from "./log";
 import { storage } from "./settings";
+import { apiGet, idFromTimestamp, idTimestamp, isNewer, isNotOlder, newestId, sleep } from "./util";
 
 const SILENCED_STORES = [
     "ReadStateStore",
@@ -31,38 +32,28 @@ const SILENCED_STORES = [
     "ActiveChannelsStore",
 ];
 
-function shouldSilence(action: any) {
-    return !!action?.message && !action.optimistic && silentForUnread(action.message);
-}
-
-/** Store nodes of the dispatcher: a plain object in Discord 300.x, a Map since 350.x. */
-function storeNodes(AH: any): any[] | null {
-    const nodes = AH?._dependencyGraph?.nodes ?? AH?._nodes;
-    if (!nodes) return null;
-    return nodes instanceof Map ? [...nodes.values()] : Object.values(nodes);
-}
+const shouldSilence = (action: any) => !!action?.message && !action.optimistic && silentForUnread(action.message);
+const newestOf = (msgs: any[]) => msgs.reduce<string | undefined>((a, m) => newestId(a, m.id), undefined)!;
 
 function wrapStoreHandlers() {
-    const AH = FluxDispatcher._actionHandlers;
-    const nodes = storeNodes(AH);
+    const nodes = storeNodes();
     if (!nodes) {
         log.error("flux store nodes not found, unread silencing disabled");
         return () => {};
     }
     const restore: (() => void)[] = [];
     for (const node of nodes) {
-        if (!node) continue;
-        if (!SILENCED_STORES.includes(node.name)) continue;
+        if (!SILENCED_STORES.includes(node?.name)) continue;
         const handlers = node.actionHandler;
         const orig = handlers?.MESSAGE_CREATE;
         if (typeof orig !== "function") continue;
-        handlers.MESSAGE_CREATE = function (this: any, action: any) {
-            if (shouldSilence(action)) return false;
-            return orig.apply(this, arguments as any);
+        handlers.MESSAGE_CREATE = function (this: unknown, action: any) {
+            return shouldSilence(action) ? false : orig.call(this, action);
         };
         restore.push(() => void (handlers.MESSAGE_CREATE = orig));
     }
     if (!restore.length) log.error("no unread-related stores found, unread silencing disabled");
+    const AH = FluxDispatcher._actionHandlers;
     AH._invalidateCaches?.();
     return () => {
         restore.forEach(f => f());
@@ -75,14 +66,9 @@ function wrapStoreHandlers() {
 const pendingAcks = new Map<string, string>();
 let ackTimer: ReturnType<typeof setTimeout> | null = null;
 
-function snowflakeMax(a: string | undefined, b: string) {
-    if (!a) return b;
-    return a.length !== b.length ? (a.length > b.length ? a : b) : a > b ? a : b;
-}
-
 function queueAck(channelId: string, messageId: string) {
     if (!storage.serverAck) return;
-    pendingAcks.set(channelId, snowflakeMax(pendingAcks.get(channelId), messageId));
+    pendingAcks.set(channelId, newestId(pendingAcks.get(channelId), messageId));
     ackTimer ??= setTimeout(flushAcks, 2500);
 }
 
@@ -101,26 +87,23 @@ function flushAcks() {
 
 function onMessageCreate(action: any) {
     if (!shouldSilence(action)) return;
-    const { channelId, message } = action;
     // Chat had nothing new before this message: moving the server ack keeps it that way.
-    if (!ReadStateStore().hasUnread(channelId)) queueAck(channelId, message.id);
+    if (!ReadStateStore().hasUnread(action.channelId)) queueAck(action.channelId, action.message.id);
 }
 
 // ---- startup reconcile ----------------------------------------------------------------------
 
-const DISCORD_EPOCH = 1420070400000;
 let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
 
 function ackAnchor(state: any): string | null {
     if (state._ackMessageId) return state._ackMessageId;
-    if (state._ackMessageTimestamp) return String((BigInt(state._ackMessageTimestamp) - BigInt(DISCORD_EPOCH)) << BigInt(22));
+    if (state._ackMessageTimestamp) return idFromTimestamp(state._ackMessageTimestamp);
     return null;
 }
 
 function isMuted(channelId: string) {
     const ch = ChannelStore().getChannel(channelId);
-    if (!ch?.guild_id) return false;
-    return !!UserGuildSettingsStore()?.isGuildOrCategoryOrChannelMuted?.(ch.guild_id, channelId);
+    return !!ch?.guild_id && !!UserGuildSettingsStore()?.isGuildOrCategoryOrChannelMuted?.(ch.guild_id, channelId);
 }
 
 async function reconcile() {
@@ -135,19 +118,18 @@ async function reconcile() {
         if (!after) continue;
         try {
             for (let page = 0; page < 3; page++) {
-                const res = await HTTP().get({ url: `/channels/${s.channelId}/messages`, query: { after, limit: 100 } });
-                const msgs: any[] = res.body ?? [];
-                if (!msgs.length || !msgs.every(m => silentForUnread(m))) break;
-                const newest = msgs.reduce((a: string | undefined, m: any) => snowflakeMax(a, m.id), undefined as any);
+                const msgs = await apiGet(`/channels/${s.channelId}/messages`, { after, limit: 100 });
+                if (!msgs.length || !msgs.every(silentForUnread)) break;
+                const newest = newestOf(msgs);
                 queueAck(s.channelId, newest);
                 acked++;
                 if (msgs.length < 100) break;
                 after = newest;
             }
-        } catch (e: any) {
-            if (e?.status === 429) await new Promise(r => setTimeout(r, (e.body?.retry_after ?? 2) * 1000));
+        } catch (e) {
+            log.warn("reconcile request failed", e);
         }
-        await new Promise(r => setTimeout(r, 350));
+        await sleep(350);
     }
     if (states.length) log.info(`reconcile: checked ${states.length} unread channel(s), ${acked} only had hidden messages`);
 }
@@ -161,14 +143,9 @@ function scheduleReconcile(delay = 4000) {
 const onConnectionOpen = () => scheduleReconcile();
 
 // ---- passive updates ------------------------------------------------------------------------
-// For "passive" guilds Discord sends PASSIVE_UPDATE_V2 with only a channel's new last message id,
-// no author. ReadStateStore would light the channel up at once. Entries that would turn a read
-// channel unread are held back, checked with one request, and released only if something visible
-// arrived; hidden-only activity is acked instead.
-
-function snowflakeGreater(a: string, b: string) {
-    return a.length !== b.length ? a.length > b.length : a > b;
-}
+// For "passive" guilds Discord sends PASSIVE_UPDATE_V2 with only a channel's new last message id.
+// Entries that would turn a read channel unread are held back and checked with one request:
+// released if something visible arrived, acked if only hidden messages did.
 
 /** Same action with only these channels and every other list emptied, so no other update repeats. */
 function passiveWith(action: any, key: string, channels: any[]) {
@@ -186,17 +163,14 @@ async function verifyPassive(action: any, key: string, held: any[]) {
         const state = RS.getAllReadStates?.().find((s: any) => s.channelId === channelId);
         const after = (state && ackAnchor(state)) ?? RS.lastMessageId(channelId);
         try {
-            const msgs: any[] = after ? (await HTTP().get({ url: `/channels/${channelId}/messages`, query: { after, limit: 50 } })).body ?? [] : [];
+            const msgs = after ? await apiGet(`/channels/${channelId}/messages`, { after, limit: 50 }) : [];
             if (!msgs.length) continue; // nothing there anymore (deleted): drop
-            if (msgs.every(m => silentForUnread(m))) {
-                queueAck(channelId, msgs.reduce((a: string | undefined, m: any) => snowflakeMax(a, m.id), undefined as any));
-                continue;
-            }
-            release.push(entry);
-        } catch (e) {
+            if (msgs.every(silentForUnread)) queueAck(channelId, newestOf(msgs));
+            else release.push(entry);
+        } catch {
             release.push(entry); // fail open: never lose a real unread
         }
-        await new Promise(r => setTimeout(r, 250));
+        await sleep(250);
     }
     log.info(`passive update: ${held.length} held, ${release.length} released`);
     if (release.length) FluxDispatcher.dispatch(passiveWith(action, key, release));
@@ -215,7 +189,7 @@ export function interceptPassive(action: any): boolean {
         if (!c?.id || !last || c.id === selected || RS.hasUnread(c.id)) return true;
         // Without a local read state there's nothing to check the update against: let it through.
         const local = RS.lastMessageId(c.id);
-        if (!local || !snowflakeGreater(last, local)) return true;
+        if (!local || !isNewer(last, local)) return true;
         held.push(c);
         return false;
     });
@@ -224,24 +198,22 @@ export function interceptPassive(action: any): boolean {
 }
 
 // ---- what the open chat says is new --------------------------------------------------------
-// Read state comes from the server and counts hidden users' messages too, so a chat opened at
-// launch got a "25+ new messages since 12:05" banner and a NEW MESSAGES line even when only
-// blocked users had written. For chats whose messages are loaded, the unread getters are
-// answered from the visible messages instead.
+// Read state from the server counts hidden users' messages too, so a chat opened at launch got a
+// "25+ new messages since 12:05" banner and a NEW MESSAGES line even when only blocked users had
+// written. For chats whose messages are loaded up to the newest one, the unread getters are
+// answered from the visible messages instead — never with more than Discord's own values.
 
 interface UnreadView { oldestId: string | null; oldestTs: number; count: number; estimated: boolean }
-const viewCache = new WeakMap<object, { anchor: string; view: UnreadView | null }>();
+const viewCache = new WeakMap<object, { key: string; view: UnreadView | null }>();
 /** Bumped when who is hidden changes, so cached views are recomputed. */
 let hiddenVersion = 0;
-const DISCORD_EPOCH_MS = 1420070400000;
-
-const snowflakeTs = (id: string) => Number((BigInt(id) >> BigInt(22)) + BigInt(DISCORD_EPOCH_MS));
-const notOlder = (a: string, b: string) => (a.length !== b.length ? a.length > b.length : a >= b);
-
-/** Unread state without hidden messages, or null when the loaded messages can't tell. */
-/** Set while computing a view: the patched getters then answer with Discord's own values. */
+/**
+ * Set while computing a view. Kettu patches methods in place, so the getters called from inside
+ * the computation are the patched ones; while this is set they return Discord's own values.
+ */
 let computing = false;
 
+/** Unread state without hidden messages, or null when the loaded messages can't tell. */
 function unreadView(RS: any, channelId: string): UnreadView | null {
     if (computing) return null;
     computing = true;
@@ -252,51 +224,61 @@ function computeView(RS: any, channelId: string): UnreadView | null {
     const anchor: string | null = RS.getOldestUnreadMessageId(channelId);
     if (!anchor) return null;
     const cm = MessageStore().getMessages(channelId);
-    const msgs: any[] = cm?.toArray?.() ?? [];
+    if (!cm) return null;
+    const msgs: any[] = cm.toArray();
     if (!msgs.length) return null;
+    // Nothing unread by Discord's own count (e.g. just acked while the chat stays open, which keeps
+    // the old anchor): leave its values alone, we may only ever take away from them.
+    const origCount: number = RS.getUnreadCount(channelId) ?? 0;
+    if (!origCount && !RS.hasUnread(channelId)) return null;
+    // The ack and Discord's count are part of the key: reading the chat changes them without
+    // changing the loaded messages or the anchor, and a stale view kept the banner up.
+    const cacheKey = `${anchor}|${RS.ackMessageId(channelId)}|${origCount}|${hiddenVersion}`;
     const hit = viewCache.get(cm);
-    if (hit?.anchor === anchor + "|" + hiddenVersion) return hit.view;
+    if (hit?.key === cacheKey) return hit.view;
 
     // Only when the loaded messages reach the channel's newest one; otherwise new messages are missing.
     const newest: string | null = RS.lastMessageId(channelId);
-    if (cm.hasMoreAfter || !newest || !notOlder(msgs[msgs.length - 1].id, newest)) return null;
-    const unread = msgs.filter(m => notOlder(m.id, anchor));
-    // All unread messages are loaded only if something at or before the anchor is loaded too.
-    const complete = !notOlder(msgs[0].id, anchor) || msgs[0].id === anchor;
+    if (cm.hasMoreAfter || !newest || !isNotOlder(msgs[msgs.length - 1].id, newest)) return null;
+    const unread = msgs.filter(m => isNotOlder(m.id, anchor));
     const visible = unread.filter(m => !silentForUnread(m));
-    let view: UnreadView | null = null;
-    // Hidden messages can only take away from what Discord says, never add to it.
-    const origCount: number = RS.getUnreadCount(channelId) ?? 0;
+    // All unread messages are loaded only if something at or before the anchor is loaded too.
+    const complete = !isNewer(msgs[0].id, anchor);
     const origEstimated = !!RS.isEstimated(channelId);
+
+    let view: UnreadView | null = null;
     if (complete) {
         const first = visible[0];
         view = first
-            ? { oldestId: first.id, oldestTs: snowflakeTs(first.id), count: Math.min(origCount, visible.length), estimated: origEstimated && visible.length >= origCount }
+            ? { oldestId: first.id, oldestTs: idTimestamp(first.id), count: Math.min(origCount, visible.length), estimated: origEstimated && visible.length >= origCount }
             : { oldestId: null, oldestTs: 0, count: 0, estimated: false };
     } else if (unread.length !== visible.length) {
         // Older unread messages aren't loaded: keep the anchor, just don't count hidden ones we see.
-        view = { oldestId: anchor, oldestTs: RS.getOldestUnreadTimestamp(channelId), count: Math.max(0, origCount - (unread.length - visible.length)), estimated: origEstimated };
+        const hiddenSeen = unread.length - visible.length;
+        view = { oldestId: anchor, oldestTs: RS.getOldestUnreadTimestamp(channelId), count: Math.max(0, origCount - hiddenSeen), estimated: origEstimated };
     }
-    viewCache.set(cm, { anchor: anchor + "|" + hiddenVersion, view });
+    viewCache.set(cm, { key: cacheKey, view });
     return view;
 }
 
 function patchReadState() {
     const RS = ReadStateStore();
-    const names = ["getOldestUnreadMessageId", "getOldestUnreadTimestamp", "getUnreadCount", "isEstimated", "hasUnread"];
-    if (!names.every(n => typeof RS?.[n] === "function")) {
+    const getters: [keyof ReturnType<typeof ReadStateStore>, (v: UnreadView, ret: any) => any][] = [
+        ["getOldestUnreadMessageId", v => v.oldestId],
+        ["getOldestUnreadTimestamp", v => v.oldestTs],
+        ["getUnreadCount", v => v.count],
+        ["isEstimated", v => v.estimated],
+        ["hasUnread", (v, ret) => ret && v.count > 0],
+    ];
+    if (!getters.every(([name]) => typeof RS?.[name] === "function")) {
         log.warn("ReadStateStore getters changed, unread banner not adjusted");
         return () => {};
     }
-    const view = (args: any[]) => (typeof args[0] === "string" ? unreadView(RS, args[0]) : null);
-    const p = vendetta.patcher;
-    const unpatches = [
-        p.after("getOldestUnreadMessageId", RS, (a: any[], r: any) => { const v = view(a); return v ? v.oldestId : r; }),
-        p.after("getOldestUnreadTimestamp", RS, (a: any[], r: any) => { const v = view(a); return v ? v.oldestTs : r; }),
-        p.after("getUnreadCount", RS, (a: any[], r: any) => { const v = view(a); return v ? v.count : r; }),
-        p.after("isEstimated", RS, (a: any[], r: any) => { const v = view(a); return v ? v.estimated : r; }),
-        p.after("hasUnread", RS, (a: any[], r: any) => { if (!r) return r; const v = view(a); return v ? v.count > 0 : r; }),
-    ];
+    const unpatches = getters.map(([name, pick]) => vendetta.patcher.after(name, RS, ([channelId], ret) => {
+        if (typeof channelId !== "string" || (name === "hasUnread" && !ret)) return ret;
+        const v = unreadView(RS, channelId);
+        return v ? pick(v, ret) : ret;
+    }));
     return () => unpatches.forEach(u => u());
 }
 

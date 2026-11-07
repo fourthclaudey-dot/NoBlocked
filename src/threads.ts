@@ -6,7 +6,7 @@
 //        client-side THREAD_DELETE), and messages lose their link to it.
 // Payloads are rewritten before stores see them; threads that reached ChannelStore some other way
 // (the on-device cache, a mode change) are handled by a sweep over the store.
-import { ChannelStore, FluxDispatcher, UserStore } from "./discord";
+import { ChannelStore, FluxDispatcher, GuildChannelStore, GuildStore, UserStore } from "./discord";
 import { kindOf, onHiddenChange } from "./hidden";
 import { t } from "./i18n";
 import { log } from "./log";
@@ -119,7 +119,7 @@ function scrubMessage(m: any) {
         const kind = kindOf(m.author?.id);
         if (kind) m.content = placeholder(kind);
     }
-    const thread = m.thread;
+    const { thread } = m;
     const kind = threadKind(thread);
     if (!kind) return;
     if (threadModeOf(kind) === "mask") mask(thread, kind);
@@ -173,11 +173,9 @@ function knownThreads(): any[] {
     const CS = ChannelStore();
     const out = new Map<string, any>();
     const add = (c: any) => isThread(c) && out.set(c.id, c);
-    const guildIds: string[] = (() => {
-        const GS = vendetta.metro.findByStoreName("GuildStore");
-        const ids = GS?.getGuildIds?.() ?? Object.keys(GS?.getGuilds?.() ?? {});
-        return Array.isArray(ids) ? ids : [];
-    })();
+    const GS = GuildStore();
+    const ids = GS?.getGuildIds?.() ?? Object.keys(GS?.getGuilds?.() ?? {});
+    const guildIds: string[] = Array.isArray(ids) ? ids : [];
     for (const guildId of guildIds) {
         const byGuild = CS.getAllThreadsForGuild?.(guildId);
         if (byGuild) {
@@ -185,7 +183,7 @@ function knownThreads(): any[] {
             continue;
         }
         // Older stores: walk the guild's channels and ask for their threads.
-        const channels = vendetta.metro.findByStoreName("GuildChannelStore")?.getChannels?.(guildId);
+        const channels = GuildChannelStore()?.getChannels?.(guildId);
         for (const group of Object.values<any>(channels ?? {})) {
             if (!Array.isArray(group)) continue;
             for (const entry of group) {
@@ -234,7 +232,7 @@ export function refreshThreads() {
 export function startThreads() {
     // Threads read straight from the store (e.g. loaded from the on-device cache before we ran).
     const CS = ChannelStore();
-    const unpatches = ["getChannel", "getBasicChannel"].filter(k => typeof CS?.[k] === "function").map(k =>
+    const unpatches = (["getChannel", "getBasicChannel"] as const).filter(k => typeof CS?.[k] === "function").map(k =>
         vendetta.patcher.after(k, CS, (_: any[], c: any) => {
             const kind = c && threadKind(c);
             if (kind && threadModeOf(kind) === "mask") mask(c, kind);

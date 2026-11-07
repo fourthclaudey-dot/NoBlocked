@@ -45,7 +45,7 @@ const defaults: Settings = {
     cache: { blocked: [], ignored: [] },
 };
 
-export const storage: Settings = vendetta.plugin.storage;
+export const storage = vendetta.plugin.storage as Settings;
 
 export function applyDefaults() {
     const s = storage as any;

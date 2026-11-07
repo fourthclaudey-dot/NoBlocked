@@ -2,7 +2,7 @@
 // (snake_case, from flux actions) and MessageRecords (camelCase, from stores/rows).
 import { MessageStore, ReferencedMessageStore, UserStore } from "./discord";
 import { kindOf } from "./hidden";
-import { Category, countsAsNew, modeOf, storage } from "./settings";
+import { Category, countsAsNew, modeOf } from "./settings";
 
 function referencedAuthorId(message: any): string | undefined {
     const raw = message.referenced_message;
@@ -43,4 +43,3 @@ export function silentForUnread(message: any): boolean {
     return !!cat && !countsAsNew(cat);
 }
 
-export { storage };

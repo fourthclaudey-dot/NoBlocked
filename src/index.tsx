@@ -1,12 +1,12 @@
 import { FluxDispatcher } from "./discord";
 import { startHidden } from "./hidden";
-import { log } from "./log";
 import { startLoadMore } from "./loadmore";
+import { log } from "./log";
 import { interceptReactions, startReactions } from "./reactions";
 import { interceptReveal, patchRows, rerender } from "./rows";
 import { startSelfUpdate } from "./selfupdate";
 import { applyDefaults, storage } from "./settings";
-import { startThreadCount } from "./threadcount";
+import { interceptThreadCount, startThreadCount } from "./threadcount";
 import { interceptThreads, startThreads } from "./threads";
 import { SettingsPage } from "./ui";
 import { interceptPassive, startUnreads } from "./unreads";
@@ -14,7 +14,7 @@ import { interceptPassive, startUnreads } from "./unreads";
 /** True swallows the action. */
 function interceptor(action: any): boolean {
     try {
-        return interceptThreads(action) || interceptReveal(action) || interceptReactions(action) || interceptPassive(action);
+        return interceptThreads(action) || interceptReveal(action) || interceptReactions(action) || interceptPassive(action) || interceptThreadCount(action);
     } catch (e) {
         log.error("interceptor", e);
         return false;
@@ -41,7 +41,7 @@ function devBootstrap() {
     if (s.autoDebugger) s.autoDebugger = false;
     // Kettu 1.4.3 toasts don't fit Discord 350.x's toast store and crash the app chrome;
     // the debugger connection toasts every time, so drop Kettu's own toasts in dev builds.
-    const toasts = vendetta.metro.common.toasts;
+    const { toasts } = vendetta.metro.common;
     if (toasts?.open && !(globalThis as any).__nbToastPatch) {
         (globalThis as any).__nbToastPatch = vendetta.patcher.instead("open", toasts, (args: any[], orig: Function) =>
             String(args[0]?.key ?? "").startsWith("vd-toast-") ? undefined : orig(...args));

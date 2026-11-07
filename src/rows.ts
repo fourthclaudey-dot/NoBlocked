@@ -47,7 +47,7 @@ function barText(cat: Category, n: number) {
  * Text of the single bar that replaces a run of adjacent bars.
  * Counts are messages per category inside the run.
  */
-export function mergedLabel(stats: Record<Category, number>) {
+function mergedLabel(stats: Record<Category, number>) {
     const s = t();
     const total = stats.blocked + stats.ignored + stats.replies;
     const parts: string[] = [];
@@ -108,7 +108,7 @@ function collect(rows: Row[], revealedId: string | null): (Row | Bar)[] {
 }
 
 function emitBar(b: Bar, result: Row[]) {
-    let row = b.row;
+    let { row } = b;
     if (modeOf(b.cat) !== "reveal") {
         revealDenied.add(row.context);
         row = { ...row, revealed: false, content: [] };
@@ -151,7 +151,7 @@ function finish(items: (Row | Bar)[]): Row[] {
         const contexts = run.map(b => String(b.row.context));
         const id = pickHeaderId(run, contexts, [items[i + 1], result[result.length - 1]]);
         const base = run[run.length - 1].row;
-        const message = base.message;
+        const { message } = base;
         mergedRuns.set(id, contexts);
         const stats: Record<Category, number> = { blocked: 0, ignored: 0, replies: 0 };
         for (const b of run) stats[b.cat] += b.count;
@@ -189,7 +189,7 @@ const META_ROWS = new Set<unknown>([RowType.DAY, RowType.UNREAD, RowType.LOAD_BE
  * "2 Oct", or today's date above nothing, revealing that hidden users talked. Rows are newest-first,
  * so a day's content is between its divider and the next divider at a lower index.
  */
-export function dropEmptyDays(rows: Row[]): Row[] {
+function dropEmptyDays(rows: Row[]): Row[] {
     const drop = new Set<number>();
     let hasContent = false;
     for (let i = 0; i < rows.length; i++) {

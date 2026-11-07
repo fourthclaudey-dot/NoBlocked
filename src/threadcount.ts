@@ -1,10 +1,11 @@
 // The message count next to a thread's title is the server's total and includes blocked and
-// ignored users. When that total fits into one request (< 100), we fetch the thread's messages
-// once, count the hidden ones and subtract them; afterwards new/deleted messages keep it current.
+// ignored users. When that total fits into one request (< 100), the thread's messages are
+// fetched once and the hidden ones subtracted; new/deleted messages keep the number current.
 // Larger threads keep Discord's number: counting them would take several requests each.
-import { FluxDispatcher, HTTP, MessageStore } from "./discord";
+import { MessageStore, ThreadMessageStore } from "./discord";
 import { kindOf, onHiddenChange } from "./hidden";
 import { log } from "./log";
+import { apiGet } from "./util";
 
 const PAGE = 100;
 const RECOUNT_AFTER_MS = 10 * 60 * 1000;
@@ -17,24 +18,10 @@ const queued = new Set<string>();
 const queue: string[] = [];
 let running = false;
 
-const ThreadMessageStore = () => vendetta.metro.findByStoreName("ThreadMessageStore");
-
-async function request(url: string, query: Record<string, any>): Promise<any[]> {
-    for (let attempt = 0; attempt < 4; attempt++) {
-        try {
-            return (await HTTP().get({ url, query })).body ?? [];
-        } catch (e: any) {
-            if (e?.status !== 429) throw e;
-            await new Promise(r => setTimeout(r, Math.max(500, (e.body?.retry_after ?? 1) * 1000)));
-        }
-    }
-    return [];
-}
-
 const isHiddenMessage = (m: any) => COUNTED_TYPES.has(m?.type ?? 0) && !!kindOf(m?.author?.id);
 
 async function count(threadId: string) {
-    const msgs = await request(`/channels/${threadId}/messages`, { limit: PAGE });
+    const msgs = await apiGet(`/channels/${threadId}/messages`, { limit: PAGE });
     hidden.set(threadId, { n: msgs.filter(isHiddenMessage).length, at: Date.now() });
     ThreadMessageStore()?.emitChange?.();
 }
@@ -61,23 +48,27 @@ function schedule(threadId: string) {
 
 /** Discord's count for a thread, minus hidden messages when we could count them. */
 function adjust(threadId: string, total: unknown) {
-    if (typeof total !== "number" || !threadId) return total;
-    if (total >= PAGE) return total;
+    if (typeof total !== "number" || !threadId || total >= PAGE) return total;
     const known = hidden.get(threadId);
     if (!known || Date.now() - known.at > RECOUNT_AFTER_MS) schedule(threadId);
     return known ? Math.max(0, total - known.n) : total;
 }
 
-/** Keeps known counts current between recounts. */
-function onMessage(action: any) {
+/**
+ * Interceptor: keeps known counts current between recounts. Runs before stores, so a deleted
+ * message can still be looked up. Never swallows.
+ */
+export function interceptThreadCount(action: any): boolean {
+    if (action.type !== "MESSAGE_CREATE" && action.type !== "MESSAGE_DELETE") return false;
     const channelId: string | undefined = action.channelId ?? action.message?.channel_id;
     const known = channelId && hidden.get(channelId);
-    if (!known) return;
-    if (action.type === "MESSAGE_CREATE" && !action.optimistic && isHiddenMessage(action.message)) known.n++;
-    if (action.type === "MESSAGE_DELETE") {
-        const m = MessageStore().getMessage(channelId, action.id);
-        if (m && isHiddenMessage(m)) known.n = Math.max(0, known.n - 1);
+    if (!known) return false;
+    if (action.type === "MESSAGE_CREATE") {
+        if (!action.optimistic && isHiddenMessage(action.message)) known.n++;
+    } else if (isHiddenMessage(MessageStore().getMessage(channelId, action.id))) {
+        known.n = Math.max(0, known.n - 1);
     }
+    return false;
 }
 
 export function startThreadCount() {
@@ -86,18 +77,10 @@ export function startThreadCount() {
         log.warn("ThreadMessageStore.getCount not found, thread message counts unchanged");
         return () => {};
     }
-    const unpatch = vendetta.patcher.after("getCount", store, ([threadId]: any[], total: unknown) => adjust(threadId, total));
-    // Subscribed handlers run after stores; for MESSAGE_DELETE the message is gone by then, so
-    // look it up in an interceptor-like `before` on dispatch instead.
-    const unDispatch = vendetta.patcher.before("dispatch", FluxDispatcher, ([action]: any[]) => {
-        if (action?.type === "MESSAGE_CREATE" || action?.type === "MESSAGE_DELETE") {
-            try { onMessage(action); } catch {}
-        }
-    });
+    const unpatch = vendetta.patcher.after("getCount", store, ([threadId], total) => adjust(threadId, total));
     const off = onHiddenChange(() => { hidden.clear(); store.emitChange?.(); });
     return () => {
         unpatch();
-        unDispatch();
         off();
         queue.length = 0;
         queued.clear();
